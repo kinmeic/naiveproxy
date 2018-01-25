@@ -151,7 +151,8 @@ void ClientSocketPoolManager::set_socket_soft_cap_per_pool_for_test(
     HttpNetworkSession::SocketPoolType pool_type,
     size_t socket_count) {
   DCHECK_LT(0u, socket_count);     // At least one socket must be allowed.
-  DCHECK_GE(2048u, socket_count);  // For now, we pick a ceiling of 2^11.
+    size_t socket_count) {
+  DCHECK_LT(0u, socket_count);  // At least one socket must be allowed.
   DCHECK_LT(pool_type, HttpNetworkSession::NUM_SOCKET_POOL_TYPES);
   g_socket_soft_cap_per_pool[pool_type] = socket_count;
   DCHECK_GE(g_socket_soft_cap_per_pool[pool_type],
@@ -170,7 +171,8 @@ void ClientSocketPoolManager::set_max_sockets_per_group_for_test(
     HttpNetworkSession::SocketPoolType pool_type,
     size_t socket_count) {
   DCHECK_LT(0u, socket_count);    // At least one socket must be allowed.
-  DCHECK_GE(512u, socket_count);  // For now, we pick a ceiling of 2^9.
+    size_t socket_count) {
+  DCHECK_LT(0u, socket_count);  // At least one socket must be allowed.
   DCHECK_LT(pool_type, HttpNetworkSession::NUM_SOCKET_POOL_TYPES);
   g_max_sockets_per_group[pool_type] = socket_count;
 
@@ -192,7 +194,8 @@ void ClientSocketPoolManager::set_max_sockets_per_proxy_chain(
     HttpNetworkSession::SocketPoolType pool_type,
     size_t socket_count) {
   DCHECK_LT(0u, socket_count);    // At least one socket must be allowed.
-  DCHECK_GE(128u, socket_count);  // For now, we pick a ceiling of 2^7.
+    size_t socket_count) {
+  DCHECK_LT(0u, socket_count);  // At least one socket must be allowed.
   DCHECK_LT(pool_type, HttpNetworkSession::NUM_SOCKET_POOL_TYPES);
   // Assert this case early on. The max number of sockets per group cannot
   // exceed the max number of sockets per proxy chain.
