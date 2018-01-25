@@ -196,11 +196,16 @@ size_t ClientSocketPoolManager::max_sockets_per_proxy_chain(
 void ClientSocketPoolManager::set_max_sockets_per_proxy_chain(
     HttpNetworkSession::SocketPoolType pool_type,
     size_t socket_count) {
+  DCHECK_LT(0u, socket_count);    // At least one socket must be allowed.
   // LINT.IfChange(set_max_sockets_per_proxy_chain)
   // We set out explicit limits here because they are hard coded in the
   // enterprise policy MaxConnectionsPerProxy.
   CHECK_GE(socket_count, 6u);
   CHECK_LE(socket_count, 256u);
+  // Assert this case early on. The max number of sockets per group cannot
+  // exceed the max number of sockets per proxy chain.
+  DCHECK_LE(g_max_sockets_per_group[std::to_underlying(pool_type)],
+            socket_count);
   // LINT.ThenChange(/net/socket/client_socket_pool_manager.cc:SetMaxConnectionsPerProxyChain)
   GlobalMaxSocketPerProxyChain()[std::to_underlying(pool_type)] = socket_count;
 }
