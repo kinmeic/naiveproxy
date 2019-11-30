@@ -315,7 +315,7 @@ void ReportAppleAllocStats(size_t* total_virtual_size,
 
 #if (PA_BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC) && BUILDFLAG(IS_ANDROID)) || \
     (!PA_BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC) && !BUILDFLAG(IS_WIN) &&    \
-     !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_FUCHSIA))
+     !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_FUCHSIA) && !defined(__MUSL__))
 void ReportMallinfoStats(ProcessMemoryDump* pmd,
                          MemoryDumpLevelOfDetail level_of_detail,
                          size_t* total_virtual_size,
@@ -627,6 +627,7 @@ bool MallocDumpProvider::OnMemoryDump(const MemoryDumpArgs& args,
                 &excluded_waste);
 #elif BUILDFLAG(IS_FUCHSIA)
 // TODO(fuchsia): Port, see https://crbug.com/706592.
+#elif defined(__MUSL__)
 #else
   ReportMallinfoStats(pmd, args.level_of_detail, &total_virtual_size,
                       &resident_size, &allocated_objects_size,
