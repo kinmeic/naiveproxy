@@ -31,13 +31,3 @@ source_set("numerics") {
     "wrapping_math.h",
   ]
 }
-
-source_set("unittests") {
-  testonly = true
-  visibility = [ "//base/*" ]
-  sources = [ "byte_conversions_unittest.cc" ]
-  deps = [
-    ":numerics",
-    "//testing/gtest",
-  ]
-}
