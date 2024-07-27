@@ -11,14 +11,9 @@
 #include <cassert>
 #include <type_traits>
 
-#include "third_party/jni_zero/generate_jni/JniPtrImpl_jni.h"
-#include "third_party/jni_zero/generate_jni/JniRawPtrImpl_jni.h"
-#include "third_party/jni_zero/generate_jni/JniUniquePtrImpl_jni.h"
-#include "third_party/jni_zero/generate_jni/JniZero_jni.h"
 #include "third_party/jni_zero/jni_methods.h"
 #include "third_party/jni_zero/jni_zero_internal.h"
 #include "third_party/jni_zero/logging.h"
-#include "third_party/jni_zero/system_jni_unchecked_exceptions/ClassLoader_jni.h"
 
 #if defined(JNI_ZERO_MULTIPLEXING_ENABLED)
 extern const int64_t kJniZeroHashWhole;
@@ -61,19 +56,7 @@ JavaVM* g_jvm = nullptr;
 
 jclass (*g_class_resolver)(JNIEnv*, const char*) = nullptr;
 
-LeakedJavaGlobalRef<JClassLoader> g_class_loader = nullptr;
-
 void (*g_exception_handler_callback)(JNIEnv*) = nullptr;
-
-jclass DefaultClassResolver(JNIEnv* env, const char* class_name) {
-  JNI_ZERO_DCHECK(g_class_loader);
-  auto j_class_name = jni_zero::AdoptRef(env, env->NewStringUTF(class_name));
-  return g_class_loader->loadClass(env, j_class_name).Release();
-}
-
-jclass GetClassGlobalRef(JNIEnv* env, jobject obj) {
-  return static_cast<jclass>(env->NewGlobalRef(env->GetObjectClass(obj)));
-}
 
 }  // namespace
 
@@ -149,39 +132,6 @@ void InitVM(JavaVM* vm) {
     return;
   }
   g_jvm = vm;
-  JNIEnv* env = AttachCurrentThread();
-#if defined(JNI_ZERO_MULTIPLEXING_ENABLED)
-  JniZeroJni::crashIfMultiplexingMisaligned(env, kJniZeroHashWhole,
-                                            kJniZeroHashPriority);
-#else
-  // Mark as used when multiplexing not enabled.
-  (void)&Java_JniZero_crashIfMultiplexingMisaligned;
-#endif
-  ScopedJavaLocalRef<JArray<jobject>> globals =
-      JniZeroJni::init(env, internal::g_raw_ptr_release_fn != nullptr);
-  jobject empty_list = env->GetObjectArrayElement(globals.obj(), 0);
-  jobject empty_map = env->GetObjectArrayElement(globals.obj(), 1);
-  jobject jni_class_loader = env->GetObjectArrayElement(globals.obj(), 2);
-
-  // Leak a few local refs since JNI will clean them up for us anyways.
-  g_empty_list.Reset(env, CreateLeaky(env, empty_list));
-  g_empty_map.Reset(env, CreateLeaky(env, empty_map));
-  g_empty_string.Reset(env, CreateLeaky(env, env->NewString(nullptr, 0)));
-
-  g_string_class = GetClassGlobalRef(env, g_empty_string.obj());
-  g_class_loader_class = GetClassGlobalRef(env, jni_class_loader);
-  g_object_class = static_cast<jclass>(
-      env->NewGlobalRef(env->GetSuperclass(g_string_class)));
-
-  if (!g_class_resolver) {
-    // Use ClassLoader.loadClass() rather than env->FindClass() because
-    // env->FindClass() uses the bootstrap classloader for threads created by
-    // native code (which leads to classes not being able to be found).
-    if (!g_class_loader) {
-      g_class_loader.Reset(env, CreateLeaky(env, jni_class_loader));
-    }
-    g_class_resolver = &DefaultClassResolver;
-  }
 }
 
 void DisableJvmForTesting() {
@@ -231,10 +181,6 @@ void SetClassResolver(jclass (*resolver)(JNIEnv*, const char*)) {
 
 void SetClassLoader(JNIEnv* env, const JavaRef<jobject>& class_loader) {
   JNI_ZERO_DCHECK(class_loader);
-  // g_class_loader is used by codegen to resolve classes. Rather than
-  // introduce a lock when resolving classes, leak the old ref.
-  // https://crbug.com/542753540
-  g_class_loader.ResetAndLeak(env, class_loader);
 }
 
 ScopedJavaLocalRef<jclass> GetClass(JNIEnv* env, const char* class_name) {
@@ -389,56 +335,6 @@ jclass LazyGetClass(JNIEnv* env,
     }
   }
   return ret;
-}
-
-ScopedJavaLocalRef<jobject> CreateJavaJniPtr(JNIEnv* env, jlong ptr) {
-  if (!ptr) {
-    return nullptr;
-  }
-  return Java_JniPtrImpl_Constructor(env, ptr);
-}
-
-ScopedJavaLocalRef<jobject> CreateJavaJniUniquePtr(JNIEnv* env,
-                                                   jlong ptr,
-                                                   jlong deleter) {
-  if (!ptr) {
-    return nullptr;
-  }
-  return Java_JniUniquePtrImpl_Constructor(env, ptr, deleter);
-}
-
-ScopedJavaLocalRef<jobject> CreateJavaJniRawPtr(JNIEnv* env, jlong ptr) {
-  if (!ptr) {
-    return nullptr;
-  }
-  if (internal::g_raw_ptr_wrap_fn) {
-    internal::g_raw_ptr_wrap_fn(static_cast<uintptr_t>(ptr));
-  }
-  return Java_JniRawPtrImpl_Constructor(env, ptr);
-}
-
-void ReleaseJavaJniPtr(JNIEnv* env, const JavaRef<jobject>& obj) {
-  if (obj.is_null()) {
-    return;
-  }
-  // Called straight after the Java method returns, so an exception may still be
-  // pending. Generated calls treat a pending exception as fatal, so stash it.
-  ScopedJavaLocalRef<jthrowable> pending;
-  if (env->ExceptionCheck()) {
-    pending = AdoptRef(env, env->ExceptionOccurred());
-    env->ExceptionClear();
-  }
-  Java_JniPtrImpl_release(env, obj);
-  if (pending) {
-    env->Throw(pending.obj());
-  }
-}
-
-jlong GetJavaJniPtrRawValue(JNIEnv* env, const JavaRef<jobject>& obj) {
-  if (obj.is_null()) {
-    return 0;
-  }
-  return Java_JniZero_getNativePtr(env, obj);
 }
 
 }  // namespace internal
