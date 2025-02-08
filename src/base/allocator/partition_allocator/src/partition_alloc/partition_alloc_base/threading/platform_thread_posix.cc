@@ -27,8 +27,11 @@
 #include <zircon/process.h>
 #endif
 
-namespace partition_alloc::internal::base {
+#if defined(__MUSL__)
+#include "partition_alloc/shim/allocator_shim.h"
+#endif
 
+namespace partition_alloc::internal::base {
 // static
 PlatformThreadId PlatformThread::CurrentId() {
   // Pthreads doesn't have the concept of a thread ID, so we have to reach down
