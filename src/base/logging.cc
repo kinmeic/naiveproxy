@@ -508,9 +508,6 @@ bool BaseInitLoggingImpl(const LoggingSettings& settings) {
   }
 #endif
 
-  // Connects Rust logging with the //base logging functionality.
-  internal::init_rust_logging();
-
   // Ignore file options unless logging to file is set.
   if ((g_logging_destination & LOG_TO_FILE) == 0) {
     return true;
