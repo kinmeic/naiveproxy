@@ -301,7 +301,7 @@ if (!build_with_chromium) {
 # "libperfetto_client_experimental" targets defined within this BUILD.gn file.
 # Rationalize them with eseckler@. For now seems this one is only used from
 # chromium and the other one only from the Android tree.
-if (build_with_chromium) {
+if (true) {
   component("libperfetto") {
     public_configs = [ "gn:public_config" ]
     deps = [
