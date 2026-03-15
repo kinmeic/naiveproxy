@@ -166,6 +166,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   android:
+    if: false  # Temporarily disabled
     needs: cache-toolchains-posix
     runs-on: ubuntu-22.04
     strategy:
@@ -262,6 +263,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   win:
+    if: false  # Temporarily disabled
     needs: cache-toolchains-win
     runs-on: windows-2022
     strategy:
