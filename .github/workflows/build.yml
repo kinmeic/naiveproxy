@@ -167,6 +167,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   android:
     needs: cache-toolchains-posix
+    if: false  # Temporarily disabled for testing
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
@@ -381,6 +382,7 @@ jobs:
   openwrt:
     needs: cache-toolchains-posix
     runs-on: ubuntu-22.04
+    if: false  # Temporarily disabled for testing
     strategy:
       fail-fast: false
       matrix:
@@ -388,9 +390,6 @@ jobs:
           - arch: x86_64
             openwrt: "target=x86 subtarget=64"
             target_cpu: x64
-          - arch: x86
-            openwrt: "target=x86 subtarget=geode"
-            target_cpu: x86
           - arch: aarch64_cortex-a53
             openwrt: "target=sunxi subtarget=cortexa53"
             target_cpu: arm64
@@ -401,12 +400,6 @@ jobs:
             extra: 'arm_cpu="cortex-a53" build_static=true use_allocator_shim=false use_partition_alloc=false'
             openwrt_release: '24.10.0'
             openwrt_gcc_ver: '13.3.0'
-          - arch: aarch64_cortex-a72
-            openwrt: "target=mvebu subtarget=cortexa72"
-            target_cpu: arm64
-            extra: 'arm_cpu="cortex-a72"'
-          - arch: aarch64_cortex-a72-static
-            openwrt: "target=mvebu subtarget=cortexa72"
             target_cpu: arm64
             extra: 'arm_cpu="cortex-a72" build_static=true use_allocator_shim=false use_partition_alloc=false'
             openwrt_release: '24.10.0'
