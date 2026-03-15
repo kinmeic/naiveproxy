@@ -3,8 +3,16 @@ on:
   push:
     branches: [master]
     paths-ignore: [README.md]
+    tags:
+      - 'v*'
   release:
     types: [published]
+
+# Cancel previous builds when a new one is triggered
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.inputs || github.ref }}
+  cancel-in-progress: true
+
 defaults:
   run:
     shell: bash
