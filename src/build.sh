@@ -17,7 +17,7 @@ else
     is_official_build=true
     exclude_unwind_tables=true
     enable_resource_allowlist_generation=false
-    chrome_pgo_phase=2
+    chrome_pgo_phase=0
     symbol_level=0"
 fi
 
