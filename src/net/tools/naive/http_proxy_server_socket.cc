@@ -81,8 +81,9 @@ int HttpProxyServerSocket::Connect(CompletionOnceCallback callback) {
   DCHECK(!user_callback_);
 
   // If already connected, then just return OK.
-  if (completed_handshake_)
+  if (completed_handshake_) {
     return OK;
+  }
 
   next_state_ = STATE_HEADER_READ;
   buffer_.clear();
@@ -172,8 +173,9 @@ int HttpProxyServerSocket::Read(IOBuffer* buf,
       buf, buf_len,
       base::BindOnce(&HttpProxyServerSocket::OnReadWriteComplete,
                      base::Unretained(this), std::move(callback)));
-  if (rv > 0)
+  if (rv > 0) {
     was_ever_used_ = true;
+  }
   return rv;
 }
 
@@ -194,8 +196,9 @@ int HttpProxyServerSocket::Write(
       base::BindOnce(&HttpProxyServerSocket::OnReadWriteComplete,
                      base::Unretained(this), std::move(callback)),
       traffic_annotation);
-  if (rv > 0)
+  if (rv > 0) {
     was_ever_used_ = true;
+  }
   return rv;
 }
 
@@ -229,8 +232,9 @@ void HttpProxyServerSocket::OnReadWriteComplete(CompletionOnceCallback callback,
   DCHECK_NE(ERR_IO_PENDING, result);
   DCHECK(callback);
 
-  if (result > 0)
+  if (result > 0) {
     was_ever_used_ = true;
+  }
   std::move(callback).Run(result);
 }
 
@@ -307,8 +311,9 @@ std::optional<PaddingType> HttpProxyServerSocket::ParsePaddingHeaders(
 }
 
 int HttpProxyServerSocket::DoHeaderReadComplete(int result) {
-  if (result < 0)
+  if (result < 0) {
     return result;
+  }
 
   if (result == 0) {
     return ERR_CONNECTION_CLOSED;
@@ -362,7 +367,8 @@ int HttpProxyServerSocket::DoHeaderReadComplete(int result) {
     std::optional<std::string> proxy_auth;
     proxy_auth = headers.GetHeader(HttpRequestHeaders::kProxyAuthorization);
     if (proxy_auth != basic_auth_) {
-      LOG(WARNING) << "Invalid Proxy-Authorization: " << proxy_auth.value_or("");
+      LOG(WARNING) << "Invalid Proxy-Authorization: "
+                   << proxy_auth.value_or("");
       return ERR_INVALID_ARGUMENT;
     }
   }
@@ -377,7 +383,8 @@ int HttpProxyServerSocket::DoHeaderReadComplete(int result) {
     std::string host;
     int port;
 
-    std::optional<std::string> host_str = headers.GetHeader(HttpRequestHeaders::kHost);
+    std::optional<std::string> host_str =
+        headers.GetHeader(HttpRequestHeaders::kHost);
     if (host_str.has_value()) {
       if (!ParseHostAndPort(*host_str, &host, &port)) {
         LOG(WARNING) << "Invalid Host: " << *host_str;
@@ -458,8 +465,9 @@ int HttpProxyServerSocket::DoHeaderWrite() {
 }
 
 int HttpProxyServerSocket::DoHeaderWriteComplete(int result) {
-  if (result < 0)
+  if (result < 0) {
     return result;
+  }
 
   if (result != header_write_size_) {
     return ERR_FAILED;
