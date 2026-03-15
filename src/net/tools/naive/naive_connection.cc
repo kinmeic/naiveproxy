@@ -96,8 +96,9 @@ int NaiveConnection::Connect(CompletionOnceCallback callback) {
   DCHECK_EQ(next_state_, STATE_NONE);
   DCHECK(!connect_callback_);
 
-  if (full_duplex_)
+  if (full_duplex_) {
     return OK;
+  }
 
   next_state_ = STATE_CONNECT_CLIENT;
 
@@ -111,8 +112,9 @@ int NaiveConnection::Connect(CompletionOnceCallback callback) {
 void NaiveConnection::Disconnect() {
   full_duplex_ = false;
   // Closes server side first because latency is higher.
-  if (server_socket_handle_->socket())
+  if (server_socket_handle_->socket()) {
     server_socket_handle_->socket()->Disconnect();
+  }
   client_socket_->Disconnect();
 
   next_state_ = STATE_NONE;
@@ -174,8 +176,9 @@ int NaiveConnection::DoConnectClient() {
 }
 
 int NaiveConnection::DoConnectClientComplete(int result) {
-  if (result < 0)
+  if (result < 0) {
     return result;
+  }
 
   std::optional<PaddingType> client_padding_type =
       padding_detector_delegate_->GetClientPaddingType();
@@ -279,15 +282,16 @@ int NaiveConnection::DoConnectServer() {
   // Ignores socket limit set by socket pool for this type of socket.
   return InitSocketHandleForHttpRequest(
       std::move(endpoint), LOAD_IGNORE_LIMITS, MAXIMUM_PRIORITY, session_,
-      proxy_info_, {}, PRIVACY_MODE_DISABLED,
-      network_anonymization_key_, SecureDnsPolicy::kDisable, SocketTag(),
-      net_log_, server_socket_handle_.get(), io_callback_,
+      proxy_info_, {}, PRIVACY_MODE_DISABLED, network_anonymization_key_,
+      SecureDnsPolicy::kDisable, SocketTag(), net_log_,
+      server_socket_handle_.get(), io_callback_,
       ClientSocketPool::ProxyAuthCallback(), false);
 }
 
 int NaiveConnection::DoConnectServerComplete(int result) {
-  if (result < 0)
+  if (result < 0) {
     return result;
+  }
 
   std::optional<PaddingType> server_padding_type =
       padding_detector_delegate_->GetServerPaddingType();
@@ -308,10 +312,12 @@ int NaiveConnection::Run(CompletionOnceCallback callback) {
 
   // The client-side socket may be closed before the server-side
   // socket is connected.
-  if (errors_[kClient] != OK || sockets_[kClient] == nullptr)
+  if (errors_[kClient] != OK || sockets_[kClient] == nullptr) {
     return errors_[kClient];
-  if (errors_[kServer] != OK)
+  }
+  if (errors_[kServer] != OK) {
     return errors_[kServer];
+  }
 
   run_callback_ = std::move(callback);
 
@@ -337,8 +343,9 @@ int NaiveConnection::Run(CompletionOnceCallback callback) {
 }
 
 void NaiveConnection::Pull(Direction from, Direction to) {
-  if (errors_[kClient] < 0 || errors_[kServer] < 0)
+  if (errors_[kClient] < 0 || errors_[kServer] < 0) {
     return;
+  }
 
   int read_size = kBufferSize;
   read_buffers_[from] = base::MakeRefCounted<IOBufferWithSize>(kBufferSize);
@@ -349,11 +356,13 @@ void NaiveConnection::Pull(Direction from, Direction to) {
       base::BindRepeating(&NaiveConnection::OnPullComplete,
                           weak_ptr_factory_.GetWeakPtr(), from, to));
 
-  if (from == kClient && early_pull_pending_)
+  if (from == kClient && early_pull_pending_) {
     early_pull_result_ = rv;
+  }
 
-  if (rv != ERR_IO_PENDING)
+  if (rv != ERR_IO_PENDING) {
     OnPullComplete(from, to, rv);
+  }
 }
 
 void NaiveConnection::Push(Direction from, Direction to, int size) {
@@ -367,8 +376,9 @@ void NaiveConnection::Push(Direction from, Direction to, int size) {
                           weak_ptr_factory_.GetWeakPtr(), from, to),
       traffic_annotation_);
 
-  if (rv != ERR_IO_PENDING)
+  if (rv != ERR_IO_PENDING) {
     OnPushComplete(from, to, rv);
+  }
 }
 
 void NaiveConnection::Disconnect(Direction side) {
@@ -386,10 +396,12 @@ bool NaiveConnection::IsConnected(Direction side) {
 void NaiveConnection::OnBothDisconnected() {
   if (run_callback_) {
     int error = OK;
-    if (errors_[kClient] != ERR_CONNECTION_CLOSED && errors_[kClient] < 0)
+    if (errors_[kClient] != ERR_CONNECTION_CLOSED && errors_[kClient] < 0) {
       error = errors_[kClient];
-    if (errors_[kServer] != ERR_CONNECTION_CLOSED && errors_[kClient] < 0)
+    }
+    if (errors_[kServer] != ERR_CONNECTION_CLOSED && errors_[kClient] < 0) {
       error = errors_[kServer];
+    }
     std::move(run_callback_).Run(error);
   }
 }
@@ -400,11 +412,13 @@ void NaiveConnection::OnPullError(Direction from, Direction to, int error) {
   errors_[from] = error;
   Disconnect(from);
 
-  if (!write_pending_[to])
+  if (!write_pending_[to]) {
     Disconnect(to);
+  }
 
-  if (!IsConnected(from) && !IsConnected(to))
+  if (!IsConnected(from) && !IsConnected(to)) {
     OnBothDisconnected();
+  }
 }
 
 void NaiveConnection::OnPushError(Direction from, Direction to, int error) {
@@ -419,8 +433,9 @@ void NaiveConnection::OnPushError(Direction from, Direction to, int error) {
     Disconnect(to);
   }
 
-  if (!IsConnected(from) && !IsConnected(to))
+  if (!IsConnected(from) && !IsConnected(to)) {
     OnBothDisconnected();
+  }
 }
 
 void NaiveConnection::OnPullComplete(Direction from, Direction to, int result) {
@@ -434,8 +449,9 @@ void NaiveConnection::OnPullComplete(Direction from, Direction to, int result) {
     return;
   }
 
-  if (from == kClient && !can_push_to_server_)
+  if (from == kClient && !can_push_to_server_) {
     return;
+  }
 
   Push(from, to, result);
 }
@@ -451,8 +467,9 @@ void NaiveConnection::OnPushComplete(Direction from, Direction to, int result) {
           base::BindRepeating(&NaiveConnection::OnPushComplete,
                               weak_ptr_factory_.GetWeakPtr(), from, to),
           traffic_annotation_);
-      if (rv != ERR_IO_PENDING)
+      if (rv != ERR_IO_PENDING) {
         OnPushComplete(from, to, rv);
+      }
       return;
     }
   }
