@@ -80,16 +80,18 @@ void NaiveProxy::DoAcceptLoop() {
     result = listen_socket_->Accept(
         &accepted_socket_, base::BindRepeating(&NaiveProxy::OnAcceptComplete,
                                                weak_ptr_factory_.GetWeakPtr()));
-    if (result == ERR_IO_PENDING)
+    if (result == ERR_IO_PENDING) {
       return;
+    }
     HandleAcceptResult(result);
   } while (result == OK);
 }
 
 void NaiveProxy::OnAcceptComplete(int result) {
   HandleAcceptResult(result);
-  if (result == OK)
+  if (result == OK) {
     DoAcceptLoop();
+  }
 }
 
 void NaiveProxy::HandleAcceptResult(int result) {
@@ -137,15 +139,17 @@ void NaiveProxy::DoConnect() {
   int result = connection->Connect(
       base::BindRepeating(&NaiveProxy::OnConnectComplete,
                           weak_ptr_factory_.GetWeakPtr(), connection->id()));
-  if (result == ERR_IO_PENDING)
+  if (result == ERR_IO_PENDING) {
     return;
+  }
   HandleConnectResult(connection, result);
 }
 
 void NaiveProxy::OnConnectComplete(unsigned int connection_id, int result) {
   auto* connection = FindConnection(connection_id);
-  if (!connection)
+  if (!connection) {
     return;
+  }
   HandleConnectResult(connection, result);
 }
 
@@ -161,15 +165,17 @@ void NaiveProxy::DoRun(NaiveConnection* connection) {
   int result = connection->Run(
       base::BindRepeating(&NaiveProxy::OnRunComplete,
                           weak_ptr_factory_.GetWeakPtr(), connection->id()));
-  if (result == ERR_IO_PENDING)
+  if (result == ERR_IO_PENDING) {
     return;
+  }
   HandleRunResult(connection, result);
 }
 
 void NaiveProxy::OnRunComplete(unsigned int connection_id, int result) {
   auto* connection = FindConnection(connection_id);
-  if (!connection)
+  if (!connection) {
     return;
+  }
   HandleRunResult(connection, result);
 }
 
@@ -179,8 +185,9 @@ void NaiveProxy::HandleRunResult(NaiveConnection* connection, int result) {
 
 void NaiveProxy::Close(unsigned int connection_id, int reason) {
   auto it = connection_by_id_.find(connection_id);
-  if (it == connection_by_id_.end())
+  if (it == connection_by_id_.end()) {
     return;
+  }
 
   LOG(INFO) << "Connection " << connection_id
             << " closed: " << ErrorToShortString(reason);
@@ -196,8 +203,9 @@ void NaiveProxy::Close(unsigned int connection_id, int reason) {
 
 NaiveConnection* NaiveProxy::FindConnection(unsigned int connection_id) {
   auto it = connection_by_id_.find(connection_id);
-  if (it == connection_by_id_.end())
+  if (it == connection_by_id_.end()) {
     return nullptr;
+  }
   return it->second.get();
 }
 
