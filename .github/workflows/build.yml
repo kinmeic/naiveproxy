@@ -390,7 +390,6 @@ jobs:
   openwrt:
     needs: cache-toolchains-posix
     runs-on: ubuntu-22.04
-    if: false  # Temporarily disabled for testing
     strategy:
       fail-fast: false
       matrix:
