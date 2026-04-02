@@ -285,7 +285,7 @@ void PartitionAllocMallocInitOnce() {
 #if defined(__MUSL__)
     allocator_shim::AllocatorDispatch d =
         *allocator_shim::GetAllocatorDispatchChainHeadForTesting();
-    d.alloc_function = +[](size_t size, void*) -> void* {
+    d.alloc_function = +[](size_t size, AllocToken, void*) -> void* {
       // The size of the scratch fits struct atfork_funcs in Musl pthread_atfork.c.
       static char scratch[5 * sizeof(void*)];
       return size != sizeof(scratch) ? nullptr : scratch;
