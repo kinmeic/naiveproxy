@@ -176,15 +176,19 @@ def download_file(url: str, dest: str, retries=5) -> None:
 
     for attempt in range(retries):
         try:
-            with requests.get(url, stream=True) as response:
+            with requests.get(url,
+                              stream=True,
+                              headers={"Accept-Encoding": "identity"}) as response:
                 response.raise_for_status()
+                # Preserve the exact archive bytes so checksum verification
+                # matches Debian's Release file entries.
+                response.raw.decode_content = False
 
                 # Use a temporary file to write data
                 with tempfile.NamedTemporaryFile(
                         mode="wb", delete=False,
                         dir=os.path.dirname(dest)) as temp_file:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        temp_file.write(chunk)
+                    shutil.copyfileobj(response.raw, temp_file)
 
                 # Rename temporary file to destination file
                 os.rename(temp_file.name, dest)
