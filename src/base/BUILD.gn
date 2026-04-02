@@ -163,12 +163,7 @@ buildflag_header("ios_cronet_buildflags") {
 
 use_epoll = is_linux || is_chromeos || is_android
 
-generate_allowlist_from_histograms_file("memory_dump_provider_name_variants") {
-  namespace = "trace_event_metrics"
-  input_xml_file = "//tools/metrics/histograms/metadata/memory/histograms.xml"
-  output_file = "trace_event/memory_dump_provider_name_variants.h"
-  tag = "variant"
-  allow_list_name = "MemoryDumpProviderName"
+group("memory_dump_provider_name_variants") {
 }
 
 # Base and everything it depends on should be a static library rather than
@@ -2700,8 +2695,13 @@ if (is_mac) {
     header = "app_plist_size_buildflags.h"
     header_dir = "base/apple"
 
-    plist_file = read_file("//chrome/app/app-Info.plist", "string")
-    flags = [ "APP_INFO_PLIST_FILE_SIZE=" + len(plist_file) ]
+    plist_size = 0
+    if (current_toolchain == default_toolchain &&
+        path_exists("//chrome/app/app-Info.plist")) {
+      plist_file = read_file("//chrome/app/app-Info.plist", "string")
+      plist_size = len(plist_file)
+    }
+    flags = [ "APP_INFO_PLIST_FILE_SIZE=$plist_size" ]
   }
 }
 
@@ -2760,6 +2760,16 @@ copy("build_date_header") {
   sources = [ "$root_build_dir/gen/base/generated_build_date_internal.h" ]
   outputs = [ _build_date_header ]
   deps = [ ":build_date_internal($default_toolchain)" ]
+}
+
+source_set("build_time") {
+  # This is a header, but it should be private.
+  sources = [ _build_date_header ]
+  public_deps = [
+    ":base",
+    ":build_date_header",
+  ]
+  public = [ "build_time.h" ]
 }
 
 process_version("check_version_internal") {

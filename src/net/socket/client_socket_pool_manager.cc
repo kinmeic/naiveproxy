@@ -151,8 +151,6 @@ size_t ClientSocketPoolManager::socket_soft_cap_per_pool(
 void ClientSocketPoolManager::set_socket_soft_cap_per_pool_for_test(
     HttpNetworkSession::SocketPoolType pool_type,
     size_t socket_count) {
-  DCHECK_LT(0u, socket_count);     // At least one socket must be allowed.
-    size_t socket_count) {
   DCHECK_LT(0u, socket_count);  // At least one socket must be allowed.
   DCHECK_LT(pool_type, HttpNetworkSession::NUM_SOCKET_POOL_TYPES);
   g_socket_soft_cap_per_pool[pool_type] = socket_count;
@@ -170,8 +168,6 @@ size_t ClientSocketPoolManager::max_sockets_per_group(
 // static
 void ClientSocketPoolManager::set_max_sockets_per_group_for_test(
     HttpNetworkSession::SocketPoolType pool_type,
-    size_t socket_count) {
-  DCHECK_LT(0u, socket_count);    // At least one socket must be allowed.
     size_t socket_count) {
   DCHECK_LT(0u, socket_count);  // At least one socket must be allowed.
   DCHECK_LT(pool_type, HttpNetworkSession::NUM_SOCKET_POOL_TYPES);
@@ -193,8 +189,6 @@ size_t ClientSocketPoolManager::max_sockets_per_proxy_chain(
 // static
 void ClientSocketPoolManager::set_max_sockets_per_proxy_chain(
     HttpNetworkSession::SocketPoolType pool_type,
-    size_t socket_count) {
-  DCHECK_LT(0u, socket_count);    // At least one socket must be allowed.
     size_t socket_count) {
   DCHECK_LT(0u, socket_count);  // At least one socket must be allowed.
   DCHECK_LT(pool_type, HttpNetworkSession::NUM_SOCKET_POOL_TYPES);
