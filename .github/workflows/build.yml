@@ -1,8 +1,9 @@
 name: Build
 on:
   push:
-    branches: [master]
+    branches: [master, codex/chromium-147]
     paths-ignore: [README.md]
+  workflow_dispatch:
   release:
     types: [published]
 defaults:
