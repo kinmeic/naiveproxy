@@ -285,6 +285,36 @@ std::unique_ptr<URLRequestContext> BuildURLRequestContext(
 }  // namespace net
 
 int main(int argc, char* argv[]) {
+  for (int i = 1; i < argc; ++i) {
+    std::string_view arg = argv[i];
+    if (arg == "-h" || arg == "--help") {
+      std::cout << "Usage: naive { OPTIONS | config.json }\n"
+                   "\n"
+                   "Options:\n"
+                   "-h, --help                 Show this message\n"
+                   "--version                  Print version\n"
+                   "--listen=<proto>://[addr][:port] [--listen=...]\n"
+                   "                           proto: socks, http\n"
+                   "                                  redir (Linux only)\n"
+                   "--proxy=<proto>://[<user>:<pass>@]<hostname>[:<port>]\n"
+                   "                           proto: https, quic\n"
+                   "--insecure-concurrency=<N> Use N connections, insecure\n"
+                   "--extra-headers=...        Extra headers split by CRLF\n"
+                   "--host-resolver-rules=...  Resolver rules\n"
+                   "--resolver-range=...       Redirect resolver range\n"
+                   "--log[=<path>]             Log to stderr, or file\n"
+                   "--log-net-log=<path>       Save NetLog\n"
+                   "--ssl-key-log-file=<path>  Save SSL keys for Wireshark\n"
+                   "--no-post-quantum          No post-quantum key agreement\n"
+                << std::endl;
+      return EXIT_SUCCESS;
+    }
+    if (arg == "--version") {
+      std::cout << "naive " << version_info::GetVersionNumber() << std::endl;
+      return EXIT_SUCCESS;
+    }
+  }
+
   // chrome/app/chrome_exe_main_mac.cc: main()
 #if BUILDFLAG(IS_APPLE)
   partition_alloc::EarlyMallocZoneRegistration();
@@ -312,6 +342,8 @@ int main(int argc, char* argv[]) {
 
   // content/app/content_main.cc: RunContentProcess()
   base::CommandLine::Init(argc, argv);
+
+  const auto& proc = *base::CommandLine::ForCurrentProcess();
 
   // content/app/content_main.cc: RunContentProcess()
   base::EnableTerminationOnHeapCorruption();
@@ -369,7 +401,6 @@ int main(int argc, char* argv[]) {
       net::HttpNetworkSession::NORMAL_SOCKET_POOL,
       kDefaultMaxSocketsPerGroup * kExpectedMaxUsers);
 
-  const auto& proc = *base::CommandLine::ForCurrentProcess();
   const auto& args = proc.GetArgs();
   base::DictValue config_dict;
   if (args.empty() && proc.argv().size() >= 2) {
@@ -394,34 +425,6 @@ int main(int argc, char* argv[]) {
     if (const base::DictValue* dict = value->GetIfDict()) {
       config_dict = dict->Clone();
     }
-  }
-
-  if (config_dict.contains("h") || config_dict.contains("help")) {
-    std::cout << "Usage: naive { OPTIONS | config.json }\n"
-                 "\n"
-                 "Options:\n"
-                 "-h, --help                 Show this message\n"
-                 "--version                  Print version\n"
-                 "--listen=<proto>://[addr][:port] [--listen=...]\n"
-                 "                           proto: socks, http\n"
-                 "                                  redir (Linux only)\n"
-                 "--proxy=<proto>://[<user>:<pass>@]<hostname>[:<port>]\n"
-                 "                           proto: https, quic\n"
-                 "--insecure-concurrency=<N> Use N connections, insecure\n"
-                 "--extra-headers=...        Extra headers split by CRLF\n"
-                 "--host-resolver-rules=...  Resolver rules\n"
-                 "--resolver-range=...       Redirect resolver range\n"
-                 "--log[=<path>]             Log to stderr, or file\n"
-                 "--log-net-log=<path>       Save NetLog\n"
-                 "--ssl-key-log-file=<path>  Save SSL keys for Wireshark\n"
-                 "--no-post-quantum          No post-quantum key agreement\n"
-              << std::endl;
-    exit(EXIT_SUCCESS);
-  }
-
-  if (config_dict.contains("version")) {
-    std::cout << "naive " << version_info::GetVersionNumber() << std::endl;
-    exit(EXIT_SUCCESS);
   }
 
   net::NaiveConfig config;
