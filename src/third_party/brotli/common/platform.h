@@ -199,7 +199,7 @@ OR:
 #define BROTLI_TARGET_RISCV64
 #endif
 
-#if defined(__loongarch_lp64)
+#if defined(__loongarch__) || defined(__loongarch_lp64)
 #define BROTLI_TARGET_LOONGARCH64
 #endif
 
