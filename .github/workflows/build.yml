@@ -310,8 +310,9 @@ jobs:
       - run: ./build.sh
       - run: ~/.cargo/bin/sccache -s
       - run: ../tests/basic.sh out/Release/naive
-        # No real or emulated environment is available to test this.
-        if: ${{ matrix.arch != 'arm64' }}
+        # macos-15 runners are arm64. Run the smoke test only for the native
+        # arm64 build and keep producing the x64 artifact without executing it.
+        if: ${{ matrix.arch == 'arm64' }}
       - name: Pack naiveproxy assets
         run: |
           mkdir ${{ env.BUNDLE }}
