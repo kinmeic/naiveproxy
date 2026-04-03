@@ -199,7 +199,7 @@ OR:
 #define BROTLI_TARGET_RISCV64
 #endif
 
-#if defined(__loongarch_lp64)
+#if defined(__loongarch__) || defined(__loongarch_lp64)
 #define BROTLI_TARGET_LOONGARCH64
 #endif
 
@@ -666,7 +666,7 @@ BROTLI_UNUSED_FUNCTION void BrotliSuppressUnusedFunctions(void) {
 #endif
 
 #if BROTLI_GNUC_HAS_ATTRIBUTE(model, 3, 0, 3) && \
-    !defined(BROTLI_TARGET_LOONGARCH64)
+    !defined(BROTLI_TARGET_LOONGARCH64) && !defined(__loongarch__)
 #define BROTLI_MODEL(M) __attribute__((model(M)))
 #else
 #define BROTLI_MODEL(M) /* M */
