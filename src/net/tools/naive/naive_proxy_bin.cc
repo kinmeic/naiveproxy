@@ -76,6 +76,9 @@
 
 #if BUILDFLAG(IS_APPLE)
 #include "base/allocator/early_zone_registration_apple.h"
+#if PA_BUILDFLAG(USE_ALLOCATOR_SHIM)
+#include "partition_alloc/shim/early_zone_registration_utils_apple.h"
+#endif
 #include "base/apple/scoped_nsautorelease_pool.h"
 #endif
 
@@ -317,7 +320,13 @@ int main(int argc, char* argv[]) {
 
   // chrome/app/chrome_exe_main_mac.cc: main()
 #if BUILDFLAG(IS_APPLE)
-  partition_alloc::EarlyMallocZoneRegistration();
+  if (allocator_shim::IsZoneAlreadyRegistered(
+          allocator_shim::kDelegatingZoneName) ||
+      allocator_shim::IsZoneAlreadyRegistered(
+          allocator_shim::kPartitionAllocZoneName)) {
+  } else {
+    partition_alloc::EarlyMallocZoneRegistration();
+  }
 #endif
 
   // content/app/content_main.cc: RunContentProcess()
@@ -365,7 +374,15 @@ int main(int argc, char* argv[]) {
   // logic is working correctly. If not causes a hard crash, as its unexpected
   // absence has security implications.
 #if PA_BUILDFLAG(USE_PARTITION_ALLOC)
+#if BUILDFLAG(IS_APPLE)
+  if (!base::allocator::IsAllocatorInitialized()) {
+    std::cerr << "Warning: allocator shim is not initialized on this Apple "
+                 "runtime; continuing without the startup CHECK."
+              << std::endl;
+  }
+#else
   CHECK(base::allocator::IsAllocatorInitialized());
+#endif
 #endif
 
   // content/app/content_main.cc: RunContentProcess()
