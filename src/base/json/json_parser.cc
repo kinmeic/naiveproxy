@@ -426,7 +426,8 @@ std::optional<Value> JSONParser::ConsumeDictionary() {
   // Reverse |dict_storage| to keep the last of elements with the same key in
   // the input.
   std::ranges::reverse(values);
-  return Value(DictValue(PassKey<JSONParser>(), std::move(values)));
+  return Value(DictValue(std::make_move_iterator(values.begin()),
+                         std::make_move_iterator(values.end())));
 }
 
 std::optional<Value> JSONParser::ConsumeList() {
