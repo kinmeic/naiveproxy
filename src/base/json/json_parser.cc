@@ -375,7 +375,7 @@ std::optional<Value> JSONParser::ConsumeDictionary() {
     return std::nullopt;
   }
 
-  std::vector<std::pair<std::string, std::unique_ptr<Value>>> values;
+  std::vector<std::pair<std::string, Value>> values;
 
   Token token = GetNextToken();
   while (token != T_OBJECT_END) {
@@ -405,8 +405,7 @@ std::optional<Value> JSONParser::ConsumeDictionary() {
       return std::nullopt;
     }
 
-    values.emplace_back(std::move(*key),
-                        std::make_unique<Value>(std::move(*value)));
+    values.emplace_back(std::move(*key), std::move(*value));
 
     token = GetNextToken();
     if (token == T_LIST_SEPARATOR) {
