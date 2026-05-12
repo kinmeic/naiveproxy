@@ -2470,20 +2470,6 @@ component("base") {
   }
 }
 
-# This meta-target is equivalent to //base, but for rust code. It's separate
-# to make dependency management easier: base_rust depends on //base, but not
-# vice-versa.
-# TODO(crbug.com/475513466): We may want to rename :base to :base_cpp and
-# create a new meta-target :base that includes both cpp and rust code, for
-# convenience.
-group("base_rust") {
-  public_deps = [
-    ":callback",
-    ":run_loop",
-    ":sequenced_task_runner",
-  ]
-}
-
 # A separate source_set for this header to avoid circular dependencies.
 source_set("compiler_specific") {
   public = [ "compiler_specific.h" ]
