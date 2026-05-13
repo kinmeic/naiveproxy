@@ -83,8 +83,7 @@ def start_naive(naive_args, config_file):
 
     if argv.rootfs:
         if not with_qemu:
-            if not os.path.exists(os.path.join(argv.rootfs, 'naive')):
-                shutil.copy2(argv.naive, argv.rootfs)
+            shutil.copy2(argv.naive, argv.rootfs)
             # bwrap isolates filesystem, config_file needs a copy inside.
             if config_file is not None:
                 shutil.copy2(config_file, argv.rootfs)
