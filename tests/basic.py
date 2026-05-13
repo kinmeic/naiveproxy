@@ -83,12 +83,17 @@ def start_naive(naive_args, config_file):
 
     if argv.rootfs:
         if not with_qemu:
-            shutil.copy2(argv.naive, argv.rootfs)
+            fd, staged_naive = tempfile.mkstemp(
+                dir=argv.rootfs, prefix='naive.')
+            os.close(fd)
+            shutil.copy2(argv.naive, staged_naive)
             # bwrap isolates filesystem, config_file needs a copy inside.
             if config_file is not None:
                 shutil.copy2(config_file, argv.rootfs)
+            staged_name = os.path.basename(staged_naive)
             cmdline = ['bwrap', '--die-with-parent', '--bind', argv.rootfs, '/',
-                       '--proc', '/proc', '--dev', '/dev', '--chdir', '/', '/naive']
+                       '--proc', '/proc', '--dev', '/dev', '--chdir', '/',
+                       f'/{staged_name}']
         else:
             cmdline = [f'qemu-{with_qemu}',
                        '-L', argv.rootfs, argv.naive]
@@ -100,6 +105,7 @@ def start_naive(naive_args, config_file):
     env["TEST_MARK_STARTUP"] = "yes"
     proc = subprocess.Popen(cmdline, stdout=subprocess.DEVNULL, env=env,
                             stderr=subprocess.PIPE, text=True, encoding='utf-8')
+    proc.staged_naive = staged_naive if argv.rootfs and not with_qemu else None
     print('subprocess.Popen', ' '.join(cmdline), 'pid:', proc.pid)
 
     def terminate(proc):
@@ -137,6 +143,12 @@ def terminate_and_wait(proc):
         print('kill pid', proc.pid)
         proc.kill()
         proc.wait(timeout=5)
+    staged_naive = getattr(proc, 'staged_naive', None)
+    if staged_naive:
+        try:
+            os.remove(staged_naive)
+        except OSError:
+            pass
 
 
 port = 10000
