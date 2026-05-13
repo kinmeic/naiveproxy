@@ -405,15 +405,16 @@ int main(int argc, char* argv[]) {
   url::AddStandardScheme("socks",
                          url::SCHEME_WITH_HOST_PORT_AND_USER_INFORMATION);
   url::AddStandardScheme("redir", url::SCHEME_WITH_HOST_AND_PORT);
+  constexpr size_t kMaxSocketsPerProxyChain = 256;
   net::ClientSocketPoolManager::set_socket_soft_cap_per_pool_for_test(
       net::HttpNetworkSession::SocketPoolType::kNormal,
       kDefaultMaxSocketsPerPool * kExpectedMaxUsers);
   net::ClientSocketPoolManager::set_max_sockets_per_proxy_chain(
       net::HttpNetworkSession::SocketPoolType::kNormal,
-      kDefaultMaxSocketsPerPool * kExpectedMaxUsers);
+      kMaxSocketsPerProxyChain);
   net::ClientSocketPoolManager::set_max_sockets_per_group_for_test(
       net::HttpNetworkSession::SocketPoolType::kNormal,
-      kDefaultMaxSocketsPerGroup * kExpectedMaxUsers);
+      kDefaultMaxSocketsPerGroup);
 
   const auto& args = proc.GetArgs();
   base::DictValue config_dict;
