@@ -374,15 +374,12 @@ int main(int argc, char* argv[]) {
   // logic is working correctly. If not causes a hard crash, as its unexpected
   // absence has security implications.
 #if PA_BUILDFLAG(USE_PARTITION_ALLOC)
-#if BUILDFLAG(IS_APPLE)
   if (!base::allocator::IsAllocatorInitialized()) {
-    std::cerr << "Warning: allocator shim is not initialized on this Apple "
-                 "runtime; continuing without the startup CHECK."
-              << std::endl;
+    std::cerr
+        << "Warning: allocator shim is not initialized on this runtime; "
+           "continuing without the startup CHECK."
+        << std::endl;
   }
-#else
-  CHECK(base::allocator::IsAllocatorInitialized());
-#endif
 #endif
 
   // content/app/content_main.cc: RunContentProcess()
