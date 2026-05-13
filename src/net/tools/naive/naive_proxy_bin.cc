@@ -318,8 +318,16 @@ int main(int argc, char* argv[]) {
     }
   }
 
+  const bool emit_startup_marks = getenv("TEST_MARK_STARTUP") != nullptr;
+  auto startup_mark = [&](const char* mark) {
+    if (emit_startup_marks) {
+      std::cerr << "STARTUP_MARK: " << mark << std::endl;
+    }
+  };
+
   // chrome/app/chrome_exe_main_mac.cc: main()
 #if BUILDFLAG(IS_APPLE)
+  startup_mark("before early malloc zone registration");
   if (allocator_shim::IsZoneAlreadyRegistered(
           allocator_shim::kDelegatingZoneName) ||
       allocator_shim::IsZoneAlreadyRegistered(
@@ -327,6 +335,7 @@ int main(int argc, char* argv[]) {
   } else {
     partition_alloc::EarlyMallocZoneRegistration();
   }
+  startup_mark("after early malloc zone registration");
 #endif
 
   // content/app/content_main.cc: RunContentProcess()
@@ -341,30 +350,39 @@ int main(int argc, char* argv[]) {
   // linker if allocator_shim.o is not referenced by the following call,
   // resulting in undefined behavior of accessing uninitialized TLS
   // data in PurgeCurrentThread() when PA is enabled.
+  startup_mark("before allocator shim init");
   allocator_shim::InitializeAllocatorShim();
+  startup_mark("after allocator shim init");
 #endif
 
   // content/app/content_main.cc: RunContentProcess()
   base::EnableTerminationOnOutOfMemory();
+  startup_mark("oom handler enabled");
 
   DuplicateSwitchCollector::InitInstance();
+  startup_mark("duplicate switch collector initialized");
 
   // content/app/content_main.cc: RunContentProcess()
   base::CommandLine::Init(argc, argv);
+  startup_mark("command line initialized");
 
   const auto& proc = *base::CommandLine::ForCurrentProcess();
+  startup_mark("current process cmdline obtained");
 
   // content/app/content_main.cc: RunContentProcess()
   base::EnableTerminationOnHeapCorruption();
+  startup_mark("heap corruption termination enabled");
 
   // content/app/content_main.cc: RunContentProcess()
   //   content/app/content_main_runner_impl.cc: Initialize()
   base::AtExitManager exit_manager;
+  startup_mark("at-exit manager created");
 
 #if PA_BUILDFLAG(USE_PARTITION_ALLOC)
   std::string process_type = "";
   base::allocator::PartitionAllocSupport::Get()->ReconfigureEarlyish(
       process_type);
+  startup_mark("partition alloc reconfigure earlyish");
 #endif
 
   // content/app/content_main.cc: RunContentProcess()
@@ -380,41 +398,53 @@ int main(int argc, char* argv[]) {
            "continuing without the startup CHECK."
         << std::endl;
   }
+  startup_mark("allocator initialized check passed");
 #endif
 
   // content/app/content_main.cc: RunContentProcess()
   //   content/app/content_main_runner_impl.cc: Run()
   base::FeatureList::InitInstance("PartitionConnectionsByNetworkIsolationKey",
                                   std::string());
+  startup_mark("feature list initialized");
 
 #if PA_BUILDFLAG(USE_PARTITION_ALLOC)
   base::allocator::PartitionAllocSupport::Get()
       ->ReconfigureAfterFeatureListInit(/*process_type=*/"");
+  startup_mark("partition alloc reconfigure after feature list");
 #endif
 
   base::SingleThreadTaskExecutor io_task_executor(base::MessagePumpType::IO);
+  startup_mark("single thread task executor created");
   base::ThreadPoolInstance::CreateAndStartWithDefaultParams("naive");
+  startup_mark("thread pool started");
 
 #if PA_BUILDFLAG(USE_PARTITION_ALLOC)
   base::allocator::PartitionAllocSupport::Get()->ReconfigureAfterTaskRunnerInit(
       process_type);
+  startup_mark("partition alloc reconfigure after task runner");
 #endif
 
   url::AddStandardScheme("quic",
                          url::SCHEME_WITH_HOST_PORT_AND_USER_INFORMATION);
+  startup_mark("added quic scheme");
   url::AddStandardScheme("socks",
                          url::SCHEME_WITH_HOST_PORT_AND_USER_INFORMATION);
+  startup_mark("added socks scheme");
   url::AddStandardScheme("redir", url::SCHEME_WITH_HOST_AND_PORT);
+  startup_mark("added redir scheme");
   constexpr size_t kMaxSocketsPerProxyChain = 256;
   net::ClientSocketPoolManager::set_socket_soft_cap_per_pool_for_test(
       net::HttpNetworkSession::SocketPoolType::kNormal,
       kDefaultMaxSocketsPerPool * kExpectedMaxUsers);
+  startup_mark("set soft cap per pool");
   net::ClientSocketPoolManager::set_max_sockets_per_proxy_chain(
       net::HttpNetworkSession::SocketPoolType::kNormal,
       kMaxSocketsPerProxyChain);
+  startup_mark("set max sockets per proxy chain");
   net::ClientSocketPoolManager::set_max_sockets_per_group_for_test(
       net::HttpNetworkSession::SocketPoolType::kNormal,
       kDefaultMaxSocketsPerGroup);
+  startup_mark("set max sockets per group");
 
   const auto& args = proc.GetArgs();
   base::DictValue config_dict;
@@ -446,7 +476,9 @@ int main(int argc, char* argv[]) {
   if (!config.Parse(config_dict)) {
     return EXIT_FAILURE;
   }
+  startup_mark("config parsed");
   CHECK(logging::InitLogging(config.log));
+  startup_mark("logging initialized");
 
   if (!config.ssl_key_log_file.empty()) {
     net::SSLClientSocket::SetSSLKeyLogger(
@@ -474,6 +506,7 @@ int main(int argc, char* argv[]) {
   }
 
   auto cert_context = net::BuildCertURLRequestContext(net_log);
+  startup_mark("cert context built");
   scoped_refptr<net::CertNetFetcherURLRequest> cert_net_fetcher;
   // The builtin verifier is supported but not enabled by default on Mac,
   // falling back to CreateSystemVerifyProc() which drops the net fetcher,
@@ -545,6 +578,7 @@ int main(int argc, char* argv[]) {
       contexts.push_back(net::BuildURLRequestContext(
           config, std::move(cert_net_fetcher), net_log));
     }
+    startup_mark("request context built");
     auto& context = contexts.back();
     auto* session = context->http_transaction_factory()->GetSession();
     auto naive_proxy = std::make_unique<net::NaiveProxy>(
