@@ -283,7 +283,8 @@ int NaiveConnection::DoConnectServer() {
   return InitSocketHandleForHttpRequest(
       std::move(endpoint), LOAD_IGNORE_LIMITS, MAXIMUM_PRIORITY, session_,
       proxy_info_, {}, PRIVACY_MODE_DISABLED, network_anonymization_key_,
-      SecureDnsPolicy::kDisable, SocketTag(), net_log_,
+      SecureDnsPolicy::kDisable, SocketTag(), handles::kInvalidNetworkHandle,
+      net_log_,
       server_socket_handle_.get(), io_callback_,
       ClientSocketPool::ProxyAuthCallback());
 }
