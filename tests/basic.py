@@ -128,6 +128,17 @@ def start_naive(naive_args, config_file):
             return proc
 
 
+def terminate_and_wait(proc):
+    print('terminate pid', proc.pid)
+    proc.terminate()
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        print('kill pid', proc.pid)
+        proc.kill()
+        proc.wait(timeout=5)
+
+
 port = 10000
 
 
@@ -172,8 +183,7 @@ def test_naive_once(proxy, *args, **kwargs):
         if config_file is not None:
             os.remove(config_file)
         for naive_proc in naive_procs:
-            print('terminate pid', naive_proc.pid)
-            naive_proc.terminate()
+            terminate_and_wait(naive_proc)
 
     for args_instance in args:
         naive_args = args_instance.format_map(port_dict).split()
