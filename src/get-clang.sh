@@ -97,7 +97,14 @@ if [ "$target_os" = android -a ! -d third_party/android_toolchain/ndk ]; then
   # https://dl.google.com/android/repository/android-ndk-r25c-linux.zip
   android_ndk_version=$(grep 'default_android_ndk_version = ' build/config/android/config.gni | cut -d'"' -f2)
   if [ ! "$android_ndk_version" ]; then
-    android_ndk_cipd_version=$(grep "'android_ndk_version': Str('" DEPS | cut -d"'" -f6)
+    android_ndk_cipd_version=$(python3 - <<'PY'
+import re
+from pathlib import Path
+text = Path("DEPS").read_text()
+m = re.search(r"'android_ndk_version':\s*Str\('([^']+)'\)", text)
+print(m.group(1) if m else "")
+PY
+)
     case "$android_ndk_cipd_version" in
       2@30.0.14608247) android_ndk_version=r30-beta1;;
       *)

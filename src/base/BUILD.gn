@@ -1564,10 +1564,6 @@ component("base") {
   if (is_posix) {
     sources += [
       "base_paths_posix.h",
-      "memory/madv_free_discardable_memory_allocator_posix.cc",
-      "memory/madv_free_discardable_memory_allocator_posix.h",
-      "memory/madv_free_discardable_memory_posix.cc",
-      "memory/madv_free_discardable_memory_posix.h",
       "posix/unix_domain_socket.cc",
       "posix/unix_domain_socket.h",
       "rand_util_posix.cc",
