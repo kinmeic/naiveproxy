@@ -59,6 +59,10 @@ static inline void YieldProcessor() {
   __asm__ __volatile__("pause");
 #elif defined(ARCH_CPU_PPC64_FAMILY)
   __asm__ __volatile__("or 31,31,31");
+#elif defined(ARCH_CPU_LOONGARCH_FAMILY)
+  // LoongArch does not currently have a dedicated spin-wait hint wired up here.
+  // Use a no-op so busy-wait loops remain buildable on loong64 targets.
+  __asm__ __volatile__("nop");
 #elif defined(ARCH_CPU_RISCV64)
   // Zihintpause extension provides a pause instruction but that extension
   // is not included in the current rv64gc baseline. However, the pause
