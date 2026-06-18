@@ -1922,7 +1922,8 @@ void SpdySession::EnqueueResetStreamFrame(spdy::SpdyStreamId stream_id,
   if (session_send_window_size_ >= 72) {
     constexpr int kNonPaddingSize =
         spdy::kDataFrameMinimumSize + spdy::kRstStreamFrameSize;
-    uint8_t padding_length = base::RandInt(48, 72) - kNonPaddingSize;
+    uint8_t padding_length =
+        base::RandIntInclusive(48, 72) - kNonPaddingSize;
     size_t expected_length = kNonPaddingSize + padding_length;
     spdy::SpdyFrameBuilder builder(expected_length);
     builder.BeginNewFrame(spdy::SpdyFrameType::DATA,

@@ -94,7 +94,7 @@ NaiveProxyDelegate::OnBeforeTunnelRequest(
   }
 
   // Sends client-side padding header regardless of server support
-  std::string padding(base::RandInt(16, 32), '~');
+  std::string padding(base::RandIntInclusive(16, 32), '~');
   FillNonindexHeaderValue(base::RandUint64(), &padding[0], padding.size());
   extra_headers.SetHeader(kPaddingHeader, padding);
 
