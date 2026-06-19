@@ -63,6 +63,11 @@ static inline void YieldProcessor() {
   // LoongArch does not currently have a dedicated spin-wait hint wired up here.
   // Use a no-op so busy-wait loops remain buildable on loong64 targets.
   __asm__ __volatile__("nop");
+#elif defined(ARCH_CPU_ARM_FAMILY)
+  // Some older ARM targets in our OpenWrt matrix do not expose a dedicated
+  // yield hint through the current target feature set. Fall back to a no-op
+  // so the build remains portable on those targets.
+  __asm__ __volatile__("nop");
 #elif defined(ARCH_CPU_RISCV64)
   // Zihintpause extension provides a pause instruction but that extension
   // is not included in the current rv64gc baseline. However, the pause
