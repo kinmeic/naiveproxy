@@ -5,3 +5,5 @@ build/
 .idea/
 local.properties
 .kotlin/
+naiveproxy-release.keystore
+naiveproxy-release.env
