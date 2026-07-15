@@ -11,37 +11,39 @@
 
 namespace net {
 namespace {
-bool g_nonindex_codes_initialized;
-std::array<uint8_t, 17> g_nonindex_codes;
+const std::array<uint8_t, 17>& GetNonindexCodes() {
+  static const std::array<uint8_t, 17> codes = [] {
+    std::array<uint8_t, 17> result;
+    size_t i = 0;
+    for (const auto& symbol : spdy::HpackHuffmanCodeVector()) {
+      if (symbol.id >= 0x20 && symbol.id <= 0x7f && symbol.length >= 8) {
+        if (i >= result.size()) {
+          break;
+        }
+        result[i] = symbol.id;
+        ++i;
+      }
+    }
+    CHECK_EQ(i, result.size());
+    return result;
+  }();
+  return codes;
+}
 }  // namespace
 
 void InitializeNonindexCodes() {
-  if (g_nonindex_codes_initialized) {
-    return;
-  }
-  g_nonindex_codes_initialized = true;
-  unsigned i = 0;
-  for (const auto& symbol : spdy::HpackHuffmanCodeVector()) {
-    if (symbol.id >= 0x20 && symbol.id <= 0x7f && symbol.length >= 8) {
-      if (i >= sizeof(g_nonindex_codes)) {
-        break;
-      }
-      g_nonindex_codes[i] = symbol.id;
-      ++i;
-    }
-  }
-  CHECK(i == sizeof(g_nonindex_codes));
+  (void)GetNonindexCodes();
 }
 
 void FillNonindexHeaderValue(uint64_t unique_bits, base::span<uint8_t> span) {
-  DCHECK(g_nonindex_codes_initialized);
+  const std::array<uint8_t, 17>& nonindex_codes = GetNonindexCodes();
   int first = span.size() < 16 ? span.size() : 16;
   for (int i = 0; i < first; i++) {
-    span[i] = g_nonindex_codes[unique_bits & 0b1111];
+    span[i] = nonindex_codes[unique_bits & 0b1111];
     unique_bits >>= 4;
   }
   for (size_t i = first; i < span.size(); ++i) {
-    span[i] = g_nonindex_codes[16];
+    span[i] = nonindex_codes[16];
   }
 }
 }  // namespace net
