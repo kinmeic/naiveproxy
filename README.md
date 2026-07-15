@@ -27,6 +27,12 @@ Users should always use the latest version to keep signatures identical to Chrom
 
 Build from source: Please see [.github/workflows/build.yml](https://github.com/klzgrad/naiveproxy/blob/master/.github/workflows/build.yml).
 
+### CI build artifacts
+
+The GitHub Actions workflow builds Linux x64, macOS x64/arm64, and OpenWrt x86_64, aarch64_cortex-a53, and aarch64_cortex-a76. Each OpenWrt build also includes an `.ipk` for OpenWrt 24.10 and an `.apk` for OpenWrt 25.12. Android builds produce an arm64-v8a plugin APK.
+
+To sign Android release APKs, generate a stable private key once with `./apk/create-signing-key.sh`. It creates ignored local files `apk/naiveproxy-release.keystore` and `apk/naiveproxy-release.env`; add the four values in the `.env` file as repository Actions secrets. Without those secrets, the workflow uploads an explicitly named unsigned APK as an artifact but never attaches it to a GitHub Release.
+
 ## Server setup
 
 The following describes the naïve fork of Caddy forwardproxy setup.
@@ -158,4 +164,3 @@ The first CONNECT request to a server cannot use "Fast Open" to send payload bef
 * TLS over TLS overhead also causes packets to consistently exceed MTU limits, which should not happen for an originating user agent. Fixing this requires re-segmentation and it is not easy to do.
 * Packet length obfuscation partly relies on h2 multiplexing, which does not work if there is only one connection, a scenario not uncommon. It is not clear how to create covering co-connections organically (i.e. not hard coded).
 * Multiplexing requires use of a few long-lived tunnel connections. It is not clearly how long is appropriate for parroting and how to convincingly rotate the connections if there is an age limit or how to detect and recover stuck tunnel connections convincingly.
-

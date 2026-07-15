@@ -6,19 +6,29 @@ plugins {
 android {
     namespace = "io.nekohasekai.sagernet.plugin.naive"
 
+    val keystoreFile = System.getenv("ANDROID_KEYSTORE_FILE")
+    val keystorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+    val releaseKeyAlias = System.getenv("ANDROID_KEY_ALIAS")
+    val releaseKeyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+    val hasReleaseSigning = listOf(keystoreFile, keystorePassword, releaseKeyAlias, releaseKeyPassword).all { !it.isNullOrBlank() }
+
     signingConfigs {
         create("release") {
-            storeFile = rootProject.file("release.keystore")
-            storePassword = System.getenv("KEYSTORE_PASS")
-            keyAlias = "release"
-            keyPassword = System.getenv("KEYSTORE_PASS")
+            if (hasReleaseSigning) {
+                storeFile = file(keystoreFile!!)
+                storePassword = keystorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
         }
     }
 
     buildTypes {
         getByName("release") {
             isMinifyEnabled = true
-            signingConfig = signingConfigs.getByName("release")
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
