@@ -8,6 +8,10 @@ fi
 name="chromium-$want_version"
 tarball="$name.tar.xz"
 url="https://commondatastorage.googleapis.com/chromium-browser-official/$tarball"
+tar=tar
+if command -v gtar >/dev/null 2>&1; then
+  tar=gtar
+fi
 root=$(git rev-list --max-parents=0 HEAD)
 branch=$(git branch --show-current)
 git config core.autocrlf false
@@ -15,11 +19,13 @@ git config core.safecrlf false
 git -c advice.detachedHead=false checkout $root
 rm -rf src
 git checkout "$branch" -- tools
-sed -i "s/^\^/$name\//" tools/include.txt
+# The explicit backup suffix works with both GNU sed and macOS BSD sed.
+sed -i.bak "s/^\^/$name\//" tools/include.txt
+rm tools/include.txt.bak
 if [ -f "/tmp/$tarball" ]; then
-  cat "/tmp/$tarball" | tar xJf - --wildcards --wildcards-match-slash -T tools/include.txt -X tools/exclude.txt
+  cat "/tmp/$tarball" | "$tar" xJf - --wildcards --wildcards-match-slash -T tools/include.txt -X tools/exclude.txt
 else
-  curl "$url" -o- | tar xJf - --wildcards --wildcards-match-slash -T tools/include.txt -X tools/exclude.txt
+  curl "$url" -o- | "$tar" xJf - --wildcards --wildcards-match-slash -T tools/include.txt -X tools/exclude.txt
 fi
 mv "$name" src
 git rm --quiet --force -r tools
