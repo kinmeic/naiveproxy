@@ -273,8 +273,11 @@ jobs:
           if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
             apk_name="${{ env.BUNDLE }}"
             apk_name="${apk_name%.apk}-unsigned.apk"
-            mv "$apk" "app/build/outputs/apk/release/$apk_name"
-            apk="app/build/outputs/apk/release/$apk_name"
+            target_apk="app/build/outputs/apk/release/$apk_name"
+            if [ "$apk" != "$target_apk" ]; then
+              mv "$apk" "$target_apk"
+            fi
+            apk="$target_apk"
           fi
           openssl sha256 "$apk" >sha256sum.txt
           echo "SHA256SUM=$(cut -d' ' -f2 sha256sum.txt)" >>$GITHUB_ENV
