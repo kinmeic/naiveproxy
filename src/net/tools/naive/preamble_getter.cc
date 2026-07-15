@@ -215,6 +215,14 @@ int PreambleGetter::Start(CompletionOnceCallback callback,
                           bool log_url) {
   CHECK_LT(preamble_index, requests_.size());
   Request& req = *requests_[preamble_index];
+  CHECK(req.next_state == STATE_NONE);
+
+  // Release state tied to the previous socket before ClientSocketHandle::Init
+  // resets that handle. Root response parsing must also start from an empty
+  // buffer when the request is reused.
+  req.upstream.reset();
+  req.read_buffer.reset();
+  req.last_content.clear();
   req.next_state = STATE_CONNECT_SERVER_COMPLETE;
 
   url::SchemeHostPort endpoint("http", "preamble", preamble_index,
@@ -244,7 +252,7 @@ int PreambleGetter::Start(CompletionOnceCallback callback,
   // The preamble requests have to be sent through this API instead of regular
   // URLRequests because regular URLRequests are tunneled first in CONNECT
   // requests. The purpose of preamble is to send regular GET requests.
-  return InitSocketHandleForHttpRequest(
+  int rv = InitSocketHandleForHttpRequest(
       std::move(endpoint), LOAD_NORMAL, priority, session_, proxy_info_, {},
       PRIVACY_MODE_DISABLED, network_anonymization_key_,
       SecureDnsPolicy::kDisable, SocketTag(), handles::kInvalidNetworkHandle,
@@ -252,6 +260,19 @@ int PreambleGetter::Start(CompletionOnceCallback callback,
       base::BindOnce(&PreambleGetter::OnIOComplete,
                      weak_ptr_factory_.GetWeakPtr(), preamble_index),
       ClientSocketPool::ProxyAuthCallback());
+  if (rv == ERR_IO_PENDING) {
+    return rv;
+  }
+
+  // ClientSocketHandle does not run its callback for synchronous completion.
+  // Continue the state machine here so the request cannot remain permanently
+  // stuck in STATE_CONNECT_SERVER_COMPLETE.
+  rv = DoLoop(preamble_index, rv);
+  if (rv != ERR_IO_PENDING) {
+    req.callback.Reset();
+    req.read_buffer.reset();
+  }
+  return rv;
 }
 
 int PreambleGetter::DoConnectServerComplete(size_t preamble_index, int result) {
