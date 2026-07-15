@@ -24,7 +24,7 @@ const std::array<uint8_t, 17>& GetNonindexCodes() {
         ++i;
       }
     }
-    CHECK_EQ(i, result.size());
+    CHECK(i == result.size());
     return result;
   }();
   return codes;
