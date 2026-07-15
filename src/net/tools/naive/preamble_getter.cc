@@ -506,10 +506,17 @@ int PreambleGetter::DoReadComplete(size_t preamble_index, int result) {
 }
 
 void PreambleGetter::StartOne() {
-  if (requests_.empty()) {
+  std::vector<size_t> idle_request_indices;
+  for (size_t i = 0; i < requests_.size(); ++i) {
+    if (requests_[i]->next_state == STATE_NONE) {
+      idle_request_indices.push_back(i);
+    }
+  }
+  if (idle_request_indices.empty()) {
     return;
   }
-  int index = base::RandIntInclusive(0, requests_.size() - 1);
+  size_t index = idle_request_indices[base::RandIntInclusive(
+      size_t{0}, idle_request_indices.size() - 1)];
   (void)Start({}, index, /*log_url=*/false);
 }
 
