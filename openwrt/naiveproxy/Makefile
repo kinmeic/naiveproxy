@@ -23,7 +23,7 @@ endef
 
 define Build/Prepare
 	$(RM) -r $(PKG_BUILD_DIR)
-	$(MKDIR) $(PKG_BUILD_DIR)
+	mkdir -p $(PKG_BUILD_DIR)
 	$(CP) $(NAIVE_BINARY) $(PKG_BUILD_DIR)/naive
 endef
 
