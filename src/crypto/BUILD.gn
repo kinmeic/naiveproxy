@@ -71,8 +71,6 @@ component("crypto") {
     "signature_verifier.h",
     "subtle_passkey.cc",
     "subtle_passkey.h",
-    "tpm_parser.cc",
-    "tpm_parser.h",
     "unexportable_key.cc",
     "unexportable_key.h",
     "unexportable_key_metrics.cc",
@@ -142,9 +140,7 @@ component("crypto") {
     libs = [
       "crypt32.lib",
       "ncrypt.lib",
-      "tbs.lib",
     ]
-    ldflags = [ "/DELAYLOAD:tbs.dll" ]
   }
 
   # Some files are built when NSS is used for the platform certificate library.
