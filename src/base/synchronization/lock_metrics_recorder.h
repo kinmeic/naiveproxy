@@ -1,0 +1,156 @@
+// Copyright 2025 The Chromium Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+#ifndef BASE_SYNCHRONIZATION_LOCK_METRICS_RECORDER_H_
+#define BASE_SYNCHRONIZATION_LOCK_METRICS_RECORDER_H_
+
+#include <atomic>
+#include <cstddef>
+#include <optional>
+
+#include "base/base_export.h"
+#include "base/compiler_specific.h"
+#include "base/containers/ring_buffer.h"
+#include "base/functional/function_ref.h"
+#include "base/memory/raw_ptr.h"
+#include "base/memory/stack_allocated.h"
+#include "base/rand_util.h"
+#include "base/threading/thread_checker.h"
+#include "base/time/time.h"
+#include "base/time/time_override.h"
+#include "base/types/pass_key.h"
+
+namespace base {
+
+class HistogramBase;
+
+// This class is a thread-local object that uses TLS to store samples of metrics
+// related to locks, which are then reported to UMA histograms when the thread
+// goes idle.
+//
+// - `GetForCurrentThread()` is thread-safe.
+// - To prevent reentrancy and deadlocks, recording metrics and subsampling
+//   does not allocate memory or acquire any locks (see .cc file).
+
+class BASE_EXPORT LockMetricsRecorder {
+ public:
+  using PassKey =
+      base::PassKey<LockMetricsRecorder, class LockMetricsRecorderTest>;
+
+  // The type of lock the sample is associated with.
+  enum class LockType : size_t {
+    // For samples associated with base::Lock
+    kBaseLock = 0,
+    // For samples associated with partition_alloc::internal::Lock
+    kPartitionAllocLock = 1,
+    kMax = kPartitionAllocLock,
+  };
+
+  // The internal buffer size is a trade-off between memory usage and the number
+  // of samples that can be stored. With sampling, this buffer size should be
+  // sufficient for most cases. If the buffer overflows, the `RingBuffer` will
+  // overwrite the oldest samples.
+  constexpr static size_t kMaxSamples = 256;
+
+  explicit LockMetricsRecorder(PassKey);
+  LockMetricsRecorder(const LockMetricsRecorder&) = delete;
+  LockMetricsRecorder& operator=(const LockMetricsRecorder&) = delete;
+  ~LockMetricsRecorder() = default;
+
+  // Get the thread-local instance of the lock metrics recorder.
+  // Returns nullptr if `EnableRecordingOnCurrentThread()` was not called for this
+  // thread.
+  static LockMetricsRecorder* GetForCurrentThread();
+
+  static void EnableRecordingOnCurrentThread();
+
+  bool ShouldRecordLockAcquisitionTime() const;
+
+  // Records a sample into the internal buffer. Must be called on the target
+  // thread.
+  void RecordLockAcquisitionTime(TimeDelta sample, LockType type);
+
+  // Report lock acquisition times to UMA histograms, if the current thread is
+  // the target thread.
+  void ReportLockAcquisitionTimes();
+
+  // Iterate over all the samples of the given type and synchronously call the
+  // FunctionRef for each sample. Only exposed for testing. Call
+  // `ReportLockAcquisitionTimes()` to report histograms for all the stored
+  // samples.
+  void ForEachSample(LockType type, FunctionRef<void(const TimeDelta&)> f);
+
+  // Timer that records into a lock metrics object.
+  class BASE_EXPORT ScopedLockAcquisitionTimer {
+    STACK_ALLOCATED();
+
+   public:
+    ScopedLockAcquisitionTimer()
+        : ScopedLockAcquisitionTimer(
+              LockMetricsRecorder::GetForCurrentThread()) {}
+
+    ScopedLockAcquisitionTimer(const ScopedLockAcquisitionTimer&) = delete;
+    ScopedLockAcquisitionTimer& operator=(const ScopedLockAcquisitionTimer&) =
+        delete;
+
+    ~ScopedLockAcquisitionTimer() {
+      if (!start_time_.has_value()) [[likely]] {
+        return;
+      }
+
+      lock_metrics_->RecordLockAcquisitionTime(
+          subtle::TimeTicksNowIgnoringOverride() - *start_time_,
+          LockType::kBaseLock);
+    }
+
+    static ScopedLockAcquisitionTimer CreateForTest(
+        LockMetricsRecorder* lock_metrics);
+
+   private:
+    explicit ScopedLockAcquisitionTimer(LockMetricsRecorder* lock_metrics)
+        : lock_metrics_(lock_metrics) {
+      if (!lock_metrics_ || !lock_metrics_->ShouldRecordLockAcquisitionTime())
+          [[likely]] {
+        return;
+      }
+
+      start_time_.emplace(subtle::TimeTicksNowIgnoringOverride());
+    }
+
+    // `ElapsedTimer` is not used here since it is mocked in tests and the mock
+    // might acquire a base::Lock thereby causing re-entrancy.
+    std::optional<TimeTicks> start_time_;
+
+    // It is safe to hold onto the pointer to the lock metrics recorder since
+    // it points to a thread-local variable.
+    const raw_ptr<LockMetricsRecorder> lock_metrics_;
+  };
+
+ private:
+  constexpr static double kSamplingRatio = 0.001;
+
+  static void ReportLockHistogram(const TimeDelta& sample,
+                                  base::HistogramBase* histogram_pointer);
+
+  bool iterating_in_progress_ GUARDED_BY_CONTEXT(thread_checker_) = false;
+
+  raw_ptr<base::HistogramBase> base_lock_histogram_
+      GUARDED_BY_CONTEXT(thread_checker_) = nullptr;
+  raw_ptr<base::HistogramBase> partition_alloc_lock_histogram_
+      GUARDED_BY_CONTEXT(thread_checker_) = nullptr;
+
+  std::array<RingBuffer<TimeDelta, kMaxSamples>,
+             static_cast<size_t>(LockType::kMax) + 1>
+      sample_buffer_ GUARDED_BY_CONTEXT(thread_checker_) = {};
+
+  // Include the subsampler in the thread-local data to avoid reallocations
+  // when the subsampler is created and destroyed.
+  MetricsSubSampler subsampler_ GUARDED_BY_CONTEXT(thread_checker_);
+
+  THREAD_CHECKER(thread_checker_);
+};
+
+}  // namespace base
+
+#endif  // BASE_SYNCHRONIZATION_LOCK_METRICS_RECORDER_H_
