@@ -12,27 +12,29 @@ namespace android {
 void VerifyX509CertChain(const std::vector<std::string>& cert_chain,
                          std::string_view auth_type,
                          std::string_view host,
+                         std::string_view ocsp_response,
+                         std::string_view sct_list,
                          CertVerifyStatusAndroid* status,
                          bool* is_issued_by_known_root,
-                         std::vector<std::string>* verified_chain) {
-}
+                         std::vector<std::string>* verified_chain) {}
 
-void AddTestRootCertificate(const uint8_t* cert, size_t len) {
-}
+void AddTestRootCertificate(base::span<const uint8_t> cert) {}
 
-void ClearTestRootCertificates() {
-}
+void ClearTestRootCertificates() {}
 
 bool IsCleartextPermitted(std::string_view host) {
   return true;
+}
+
+EchMode GetEchMode(std::string_view host) {
+  return EchMode::kOpportunistic;
 }
 
 bool HaveOnlyLoopbackAddresses() {
   return false;
 }
 
-bool GetMimeTypeFromExtension(std::string_view extension,
-                              std::string* result) {
+bool GetMimeTypeFromExtension(std::string_view extension, std::string* result) {
   return false;
 }
 
@@ -79,8 +81,7 @@ bool ReportBadDefaultNetwork() {
   return false;
 }
 
-void TagSocket(SocketDescriptor socket, uid_t uid, int32_t tag) {
-}
+void TagSocket(SocketDescriptor socket, uid_t uid, int32_t tag) {}
 
 int BindToNetwork(SocketDescriptor socket, handles::NetworkHandle network) {
   return ERR_NOT_IMPLEMENTED;
@@ -94,11 +95,9 @@ int GetAddrInfoForNetwork(handles::NetworkHandle network,
   return EAI_SYSTEM;
 }
 
-void RegisterQuicConnectionClosePayload(int, base::span<uint8_t>) {
-}
+void RegisterQuicConnectionClosePayload(int, base::span<uint8_t>) {}
 
-void UnregisterQuicConnectionClosePayload(int) {
-}
+void UnregisterQuicConnectionClosePayload(int) {}
 
 NetworkBlockedReason GetNetworkBlockedReason(int) {
   return NetworkBlockedReason::kNone;
