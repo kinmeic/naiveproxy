@@ -160,11 +160,16 @@ class PosixSpawnFileActions {
 
 #if BUILDFLAG(IS_MAC)
   void Chdir(const char* path) {
+#if defined(__MAC_OS_X_VERSION_MAX_ALLOWED) && \
+    __MAC_OS_X_VERSION_MAX_ALLOWED >= 260000
     if (__builtin_available(macOS 26, *)) {
       DPSXCHECK(posix_spawn_file_actions_addchdir(&file_actions_, path));
     } else {
       DPSXCHECK(posix_spawn_file_actions_addchdir_np(&file_actions_, path));
     }
+#else
+    DPSXCHECK(posix_spawn_file_actions_addchdir_np(&file_actions_, path));
+#endif
   }
 #endif
 
