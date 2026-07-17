@@ -263,6 +263,10 @@ std::unique_ptr<URLRequestContext> BuildURLRequestContext(
         return config;
       }
 
+      EchMode GetEchMode(std::string_view) const override {
+        return EchMode::kOpportunistic;
+      }
+
       bool CanShareConnectionWithClientCerts(std::string_view) const override {
         return false;
       }
