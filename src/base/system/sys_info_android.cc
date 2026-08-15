@@ -65,6 +65,7 @@ void GetOsVersionStringAndNumbers(std::string* version_string,
 // limited to `PROP_VALUE_MAX` (92 bytes) and will fail to return the value
 // (returning a warning message instead) if the property is longer.
 std::string ReadArbitrarilyLongSystemProperty(const char* name) {
+#if __ANDROID_API__ >= 26
   // `__system_property_read_callback` was introduced in Android API level 26.
   // When available, use it because it allows reading properties of arbitrary
   // length without being truncated or limited by `PROP_VALUE_MAX`.
@@ -92,6 +93,7 @@ std::string ReadArbitrarilyLongSystemProperty(const char* name) {
         &value);
     return value;
   }
+#endif
 
   // Fallback for devices running pre-API 26 or targets compiled with a
   // minimum deployment target lower than Android 26.
