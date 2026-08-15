@@ -29,6 +29,7 @@
 #include "base/types/expected.h"
 #include "base/types/expected_macros.h"
 #include "base/types/optional_util.h"
+#include "crypto/ecdsa_utils.h"
 #include "crypto/hash.h"
 #include "crypto/keypair.h"
 #include "crypto/random.h"
@@ -128,6 +129,10 @@ std::u16string KeyIdToWindowsLabel(base::span<const uint8_t> key_id) {
 
 template <typename T>
 using SecurityStatusOr = base::expected<T, SECURITY_STATUS>;
+
+// TPM_ALG_SHA256 from the TPM 2.0 specification. Keep this local because the
+// minimized build does not include the Rust TPM parser bindings.
+constexpr DWORD kTpmAlgSha256 = 0x000B;
 
 template <typename T>
 SecurityStatusOr<void> SetNCryptProperty(NCRYPT_HANDLE handle,
@@ -702,6 +707,15 @@ class UnexportableKeyProviderWin : public UnexportableKeyProvider {
     base::ScopedBlockingCall scoped_blocking_call(
         FROM_HERE, base::BlockingType::WILL_BLOCK);
 
+    TPMOperation creation_operation =
+        usage == KeyUsage::kAttestation
+            ? TPMOperation::kNewAttestationKeyCreation
+            : TPMOperation::kNewKeyCreation;
+    TPMOperation export_operation =
+        usage == KeyUsage::kAttestation
+            ? TPMOperation::kWrappedAttestationKeyExport
+            : TPMOperation::kWrappedKeyExport;
+
     ScopedNCryptProvider provider;
     {
       SCOPED_MAY_LOAD_LIBRARY_AT_BACKGROUND_PRIORITY();
@@ -757,7 +771,7 @@ class UnexportableKeyProviderWin : public UnexportableKeyProvider {
         RETURN_IF_ERROR(
             SetNCryptProperty(
                 key.get(), NCRYPT_PCP_RSA_SCHEME_HASH_ALG_PROPERTY,
-                static_cast<DWORD>(crypto::tpm::TpmAlg::TPM_ALG_SHA256)),
+                kTpmAlgSha256),
             [&](SECURITY_STATUS status) {
               LogTPMOperationError(creation_operation, status, algo);
               return std::nullopt;
