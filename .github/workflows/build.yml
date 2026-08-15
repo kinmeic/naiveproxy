@@ -263,22 +263,30 @@ jobs:
         run: |
           mkdir -p app/libs/$APK_ABI
           cp ../src/out/Release/naive app/libs/$APK_ABI/libnaive.so
-          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
-            echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/naiveproxy-release.keystore"
-            export ANDROID_KEYSTORE_FILE="$RUNNER_TEMP/naiveproxy-release.keystore"
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ] || \
+             [ -z "$ANDROID_KEY_ALIAS" ] || \
+             [ -z "$ANDROID_KEYSTORE_PASSWORD" ] || \
+             [ -z "$ANDROID_KEY_PASSWORD" ]; then
+            echo "Android release signing secrets are required; refusing to build an unsigned APK" >&2
+            exit 1
           fi
+          export ANDROID_KEYSTORE_FILE="$RUNNER_TEMP/naiveproxy-release.keystore"
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$ANDROID_KEYSTORE_FILE"
+          test -s "$ANDROID_KEYSTORE_FILE"
+          keytool -list -keystore "$ANDROID_KEYSTORE_FILE" \
+            -storepass "$ANDROID_KEYSTORE_PASSWORD" \
+            -alias "$ANDROID_KEY_ALIAS" >/dev/null
           ./gradlew :app:assembleRelease
           apk=$(find app/build/outputs/apk/release -maxdepth 1 -name '*.apk' -print -quit)
           test -n "$apk"
-          if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
-            apk_name="${{ env.BUNDLE }}"
-            apk_name="${apk_name%.apk}-unsigned.apk"
-            target_apk="app/build/outputs/apk/release/$apk_name"
-            if [ "$apk" != "$target_apk" ]; then
-              mv "$apk" "$target_apk"
-            fi
-            apk="$target_apk"
-          fi
+          test -n "$(unzip -l "$apk" | awk -v abi="$APK_ABI" '$0 ~ "lib/" abi "/libnaive.so" { found=1 } END { print found }')"
+          android_sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          test -n "$android_sdk"
+          apksigner=$(find "$android_sdk/build-tools" \
+            -type f -name apksigner -print | sort -V | tail -n 1)
+          test -x "$apksigner"
+          "$apksigner" verify --verbose "$apk" > apk-verify.txt
+          cat apk-verify.txt
           openssl sha256 "$apk" >sha256sum.txt
           echo "SHA256SUM=$(cut -d' ' -f2 sha256sum.txt)" >>$GITHUB_ENV
       - uses: actions/upload-artifact@v4
@@ -286,6 +294,7 @@ jobs:
           name: ${{ env.BUNDLE }} sha256 ${{ env.SHA256SUM }}
           path: |
             apk/app/build/outputs/apk/release/*.apk
+            apk/apk-verify.txt
             apk/sha256sum.txt
       - name: Upload naiveproxy assets
         if: ${{ github.event_name == 'release' }}
