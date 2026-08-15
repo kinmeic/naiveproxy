@@ -9,8 +9,6 @@
 #include <string>
 #include <string_view>
 
-#include "base/feature.h"
-#include "net/base/net_export.h"
 #include "net/third_party/quiche/src/quiche/common/structured_headers.h"
 
 namespace net::structured_headers {
@@ -27,19 +25,21 @@ using ListOfLists = quiche::structured_headers::ListOfLists;
 using List = quiche::structured_headers::List;
 using Parameters = quiche::structured_headers::Parameters;
 
-// See crbug.com/377941140 for details of this migration.
-NET_EXPORT BASE_DECLARE_FEATURE(kStructuredHeadersInRust);
-
-NET_EXPORT std::optional<ParameterizedItem> ParseItem(std::string_view str);
-NET_EXPORT std::optional<List> ParseList(std::string_view str);
-NET_EXPORT std::optional<Dictionary> ParseDictionary(std::string_view str);
-
+inline std::optional<ParameterizedItem> ParseItem(std::string_view str) {
+  return quiche::structured_headers::ParseItem(str);
+}
 inline std::optional<ParameterisedList> ParseParameterisedList(
     std::string_view str) {
   return quiche::structured_headers::ParseParameterisedList(str);
 }
 inline std::optional<ListOfLists> ParseListOfLists(std::string_view str) {
   return quiche::structured_headers::ParseListOfLists(str);
+}
+inline std::optional<List> ParseList(std::string_view str) {
+  return quiche::structured_headers::ParseList(str);
+}
+inline std::optional<Dictionary> ParseDictionary(std::string_view str) {
+  return quiche::structured_headers::ParseDictionary(str);
 }
 
 inline std::optional<std::string> SerializeItem(const Item& value) {
