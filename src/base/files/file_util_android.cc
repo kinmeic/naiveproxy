@@ -4,7 +4,6 @@
 
 #include "base/files/file_util.h"
 
-#include "base/android/jni_string.h"
 #include "base/android/virtual_document_path.h"
 #include "base/files/file_path.h"
 #include "base/path_service.h"
@@ -47,13 +46,10 @@ std::optional<FilePath> ResolveToVirtualDocumentPath(const FilePath& path) {
 }
 
 std::optional<std::string> CopyFileToDownloadsCollection(
-    const FilePath& file_path,
-    const std::string& mime_type) {
-  JNIEnv* env = jni_zero::AttachCurrentThread();
-  return android::Java_FileUtils_copyFileToDownloadsCollection(
-      env, file_path.value(), mime_type);
+    const FilePath& /*file_path*/,
+    const std::string& /*mime_type*/) {
+  // The minimized Android target does not package Chromium's Java FileUtils.
+  return std::nullopt;
 }
 
 }  // namespace base
-
-DEFINE_JNI(FileUtils)
