@@ -31,7 +31,7 @@ Build from source: Please see [.github/workflows/build.yml](https://github.com/k
 
 The GitHub Actions workflow builds Linux x64, Windows x64, macOS x64/arm64, and OpenWrt x86_64, aarch64_cortex-a53, and aarch64_cortex-a76. Each OpenWrt build also includes an `.ipk` for OpenWrt 24.10 and an `.apk` for OpenWrt 25.12. Android builds produce an arm64-v8a plugin APK.
 
-To sign Android release APKs, generate a stable private key once with `./apk/create-signing-key.sh`. It creates ignored local files `apk/naiveproxy-release.keystore` and `apk/naiveproxy-release.env`; add the four values in the `.env` file as repository Actions secrets. Without those secrets, the workflow attaches an explicitly named unsigned APK to the GitHub Release.
+Android release APKs must be signed. Generate a stable private key once with `./apk/create-signing-key.sh`. It creates ignored local files `apk/naiveproxy-release.keystore` and `apk/naiveproxy-release.env`; add the four values in the `.env` file as repository Actions secrets. The workflow verifies the keystore and final APK signature, and refuses to publish an unsigned APK.
 
 ## Server setup
 
