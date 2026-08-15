@@ -735,7 +735,6 @@ component("net") {
     "http/proxy_client_socket.h",
     "http/proxy_fallback.cc",
     "http/proxy_fallback.h",
-    "http/structured_headers.cc",
     "http/structured_headers.h",
     "http/transport_security_persister.cc",
     "http/transport_security_persister.h",
@@ -1218,7 +1217,6 @@ component("net") {
     "//components/network_time/time_tracker",
     "//components/unexportable_keys",
     "//net/http:transport_security_state_generated_files",
-    "//third_party/rust/sfv/v0_15/wrapper",
     "//third_party/simdutf",
   ]
 
