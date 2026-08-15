@@ -106,7 +106,7 @@ jobs:
         arch: [x64]
     env:
       EXTRA_FLAGS: 'target_cpu="${{ matrix.arch }}"'
-      BUNDLE: naiveproxy-${{ github.event.release.tag_name || github.ref_name }}-${{ github.job }}-${{ matrix.arch }}
+      BUNDLE: naiveproxy-${{ github.event.release.tag_name || github.ref_name }}-linux-${{ matrix.arch }}
     steps:
       - uses: actions/checkout@v4
       - name: Cache toolchains (Linux, OpenWrt, Android)
@@ -311,7 +311,7 @@ jobs:
         arch: [x64]
     env:
       EXTRA_FLAGS: 'target_cpu="${{ matrix.arch }}"'
-      BUNDLE: naiveproxy-${{ github.event.release.tag_name || github.ref_name }}-${{ github.job }}-${{ matrix.arch }}
+      BUNDLE: naiveproxy-${{ github.event.release.tag_name || github.ref_name }}-win-${{ matrix.arch }}
     steps:
       - uses: actions/checkout@v4
       - name: Cache toolchains
@@ -367,7 +367,7 @@ jobs:
         arch: [x64]
     env:
       EXTRA_FLAGS: 'target_cpu="${{ matrix.arch }}"'
-      BUNDLE: naiveproxy-${{ github.event.release.tag_name || github.ref_name }}-${{ github.job }}-${{ matrix.arch }}
+      BUNDLE: naiveproxy-${{ github.event.release.tag_name || github.ref_name }}-mac-${{ matrix.arch }}
     steps:
       - uses: actions/checkout@v4
       - name: Cache toolchains and PGO
@@ -418,7 +418,7 @@ jobs:
         arch: [arm64]
     env:
       EXTRA_FLAGS: 'target_cpu="${{ matrix.arch }}"'
-      BUNDLE: naiveproxy-${{ github.event.release.tag_name || github.ref_name }}-${{ github.job }}-${{ matrix.arch }}
+      BUNDLE: naiveproxy-${{ github.event.release.tag_name || github.ref_name }}-mac-${{ matrix.arch }}
     steps:
       - uses: actions/checkout@v4
       - name: Cache toolchains and PGO
