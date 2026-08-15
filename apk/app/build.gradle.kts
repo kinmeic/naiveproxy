@@ -3,14 +3,19 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+val keystoreFile = System.getenv("ANDROID_KEYSTORE_FILE")
+val keystorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+val releaseKeyAlias = System.getenv("ANDROID_KEY_ALIAS")
+val releaseKeyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+val hasReleaseSigning = listOf(
+    keystoreFile,
+    keystorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword,
+).all { !it.isNullOrBlank() }
+
 android {
     namespace = "io.nekohasekai.sagernet.plugin.naive"
-
-    val keystoreFile = System.getenv("ANDROID_KEYSTORE_FILE")
-    val keystorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
-    val releaseKeyAlias = System.getenv("ANDROID_KEY_ALIAS")
-    val releaseKeyPassword = System.getenv("ANDROID_KEY_PASSWORD")
-    val hasReleaseSigning = listOf(keystoreFile, keystorePassword, releaseKeyAlias, releaseKeyPassword).all { !it.isNullOrBlank() }
 
     signingConfigs {
         if (hasReleaseSigning) {
@@ -80,4 +85,18 @@ android {
     sourceSets.getByName("main") {
         jniLibs.srcDir("libs")
     }
+}
+
+tasks.register("verifyReleaseSigning") {
+    doLast {
+        check(hasReleaseSigning) {
+            "Release APK signing is required. Set ANDROID_KEYSTORE_FILE, " +
+                "ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, and " +
+                "ANDROID_KEY_PASSWORD."
+        }
+    }
+}
+
+tasks.matching { it.name == "assembleRelease" }.configureEach {
+    dependsOn("verifyReleaseSigning")
 }
