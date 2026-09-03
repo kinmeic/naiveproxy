@@ -522,16 +522,25 @@ target(libcxx_target_type, "libc++") {
   # exception and rtti.
   configs -= [
     "//build/config/compiler:chromium_code",
-    "//build/config/compiler:no_exceptions",
-    "//build/config/compiler:no_rtti",
     "//build/config/coverage:default_coverage",
   ]
   configs += [
     ":config",
     "//build/config/compiler:no_chromium_code",
-    "//build/config/compiler:exceptions",
-    "//build/config/compiler:rtti",
   ]
+
+  # Windows libc++ uses the MSVC exception implementation. Other platforms
+  # keep Chromium's exception-free ABI configuration.
+  if (is_win) {
+    configs -= [
+      "//build/config/compiler:no_exceptions",
+      "//build/config/compiler:no_rtti",
+    ]
+    configs += [
+      "//build/config/compiler:exceptions",
+      "//build/config/compiler:rtti",
+    ]
+  }
 
   deps = [ "//third_party/llvm-libc:llvm-libc-shared" ]
 
