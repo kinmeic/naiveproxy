@@ -138,75 +138,75 @@ int PreambleGetter::DoLoop(size_t preamble_index, int last_io_result) {
   return rv;
 }
 
-void PreambleGetter::AddRootHeaders(HttpRequestHeaders& headers) {
-  headers.SetHeader("_method", "GET");
-  headers.SetHeader("_path", "/");
+void PreambleGetter::AddRootHeaders(HttpRequestHeaders* headers) {
+  headers->SetHeader("_method", "GET");
+  headers->SetHeader("_path", "/");
 
-  headers.SetHeader("sec-ch-ua", sec_ch_ua_);
-  headers.SetHeader("sec-ch-ua-mobile", sec_ch_ua_mobile_);
-  headers.SetHeader("sec-ch-ua-platform", sec_ch_ua_platform_);
-  headers.SetHeader("upgrade-insecure-requests", "1");
-  headers.SetHeader("user-agent", user_agent_);
+  headers->SetHeader("sec-ch-ua", sec_ch_ua_);
+  headers->SetHeader("sec-ch-ua-mobile", sec_ch_ua_mobile_);
+  headers->SetHeader("sec-ch-ua-platform", sec_ch_ua_platform_);
+  headers->SetHeader("upgrade-insecure-requests", "1");
+  headers->SetHeader("user-agent", user_agent_);
 
-  headers.SetHeader(
+  headers->SetHeader(
       "accept",
       "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/"
       "webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7");
 
-  headers.SetHeader("sec-fetch-site", "none");
-  headers.SetHeader("sec-fetch-mode", "navigate");
-  headers.SetHeader("sec-fetch-user", "?1");
-  headers.SetHeader("sec-fetch-dest", "document");
+  headers->SetHeader("sec-fetch-site", "none");
+  headers->SetHeader("sec-fetch-mode", "navigate");
+  headers->SetHeader("sec-fetch-user", "?1");
+  headers->SetHeader("sec-fetch-dest", "document");
 
-  headers.SetHeader("accept-encoding", "gzip, deflate, br, zstd");
-  headers.SetHeader("accept-language", "en-US,en;q=0.9");
-  headers.SetHeader("priority", "u=0, i");
+  headers->SetHeader("accept-encoding", "gzip, deflate, br, zstd");
+  headers->SetHeader("accept-language", "en-US,en;q=0.9");
+  headers->SetHeader("priority", "u=0, i");
 }
 
 void PreambleGetter::AddHeaders(const std::string& path,
                                 const std::string& ext,
-                                HttpRequestHeaders& headers) {
+                                HttpRequestHeaders* headers) {
   if (ext == "css" || ext == "js") {
-    headers.SetHeader("_method", "GET");
+    headers->SetHeader("_method", "GET");
   } else {
-    headers.SetHeader("_method", "HEAD");
+    headers->SetHeader("_method", "HEAD");
   }
-  headers.SetHeader("_path", path);
+  headers->SetHeader("_path", path);
 
-  headers.SetHeader("sec-ch-ua-platform", sec_ch_ua_platform_);
-  headers.SetHeader("user-agent", user_agent_);
-  headers.SetHeader("sec-ch-ua", sec_ch_ua_);
-  headers.SetHeader("sec-ch-ua-mobile", sec_ch_ua_mobile_);
+  headers->SetHeader("sec-ch-ua-platform", sec_ch_ua_platform_);
+  headers->SetHeader("user-agent", user_agent_);
+  headers->SetHeader("sec-ch-ua", sec_ch_ua_);
+  headers->SetHeader("sec-ch-ua-mobile", sec_ch_ua_mobile_);
 
   if (ext == "css") {
-    headers.SetHeader("accept", "text/css,*/*;q=0.1");
+    headers->SetHeader("accept", "text/css,*/*;q=0.1");
   } else if (ext == "js") {
-    headers.SetHeader("accept", "*/*");
+    headers->SetHeader("accept", "*/*");
   } else {
-    headers.SetHeader(
+    headers->SetHeader(
         "accept",
         "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8");
   }
 
-  headers.SetHeader("sec-fetch-site", "same-origin");
-  headers.SetHeader("sec-fetch-mode", "no-cors");
+  headers->SetHeader("sec-fetch-site", "same-origin");
+  headers->SetHeader("sec-fetch-mode", "no-cors");
   if (ext == "css") {
-    headers.SetHeader("sec-fetch-dest", "style");
+    headers->SetHeader("sec-fetch-dest", "style");
   } else if (ext == "js") {
-    headers.SetHeader("sec-fetch-dest", "script");
+    headers->SetHeader("sec-fetch-dest", "script");
   } else {
-    headers.SetHeader("sec-fetch-dest", "image");
+    headers->SetHeader("sec-fetch-dest", "image");
   }
-  headers.SetHeader("referer", root_.spec());
+  headers->SetHeader("referer", root_.spec());
 
-  headers.SetHeader("accept-encoding", "gzip, deflate, br, zstd");
-  headers.SetHeader("accept-language", "en-US,en;q=0.9");
+  headers->SetHeader("accept-encoding", "gzip, deflate, br, zstd");
+  headers->SetHeader("accept-language", "en-US,en;q=0.9");
   if (ext == "css") {
-    headers.SetHeader("priority", "u=0");
+    headers->SetHeader("priority", "u=0");
   } else if (ext == "js") {
-    headers.SetHeader("priority", "u=2");
+    headers->SetHeader("priority", "u=2");
   } else {
-    headers.SetHeader("priority", "i");
+    headers->SetHeader("priority", "i");
   }
 }
 
@@ -233,9 +233,9 @@ int PreambleGetter::Start(CompletionOnceCallback callback,
 
   HttpRequestHeaders headers;
   if (preamble_index == 0) {
-    AddRootHeaders(headers);
+    AddRootHeaders(&headers);
   } else {
-    AddHeaders(req.path, req.ext, headers);
+    AddHeaders(req.path, req.ext, &headers);
   }
   naive_proxy_delegate()->SetPreambleRequestHeaders(*proxy_server_,
                                                     preamble_index, headers);
