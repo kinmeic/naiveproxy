@@ -205,7 +205,7 @@ int NaivePaddingSocket::WritePaddingV1(
   }
   int write_buf_len =
       framer_.Write(buf->data(), buf_len, padding_size, padded->data(),
-                    kMaxBufferSize, write_user_payload_len_);
+                    kMaxBufferSize, &write_user_payload_len_);
   // Using DrainableIOBuffer here because we do not want to
   // repeatedly encode the padding frames when short writes happen.
   write_buf_ =

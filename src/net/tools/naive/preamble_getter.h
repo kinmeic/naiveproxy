@@ -81,10 +81,10 @@ class PreambleGetter {
   int DoReadComplete(size_t preamble_index, int result);
   NaiveProxyDelegate* naive_proxy_delegate() const;
 
-  void AddRootHeaders(HttpRequestHeaders& headers);
+  void AddRootHeaders(HttpRequestHeaders* headers);
   void AddHeaders(const std::string& path,
                   const std::string& ext,
-                  HttpRequestHeaders& headers);
+                  HttpRequestHeaders* headers);
 
   const ProxyInfo& proxy_info_;
   const ProxyServer* proxy_server_;
