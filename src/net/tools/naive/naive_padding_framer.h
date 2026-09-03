@@ -52,7 +52,7 @@ class NaivePaddingFramer {
             int padding_size,
             char* padded,
             int padded_capacity,
-            int& payload_consumed_len);
+            int* payload_consumed_len);
 
  private:
   enum class ReadState {
