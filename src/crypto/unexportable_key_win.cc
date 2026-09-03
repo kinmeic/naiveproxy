@@ -36,7 +36,6 @@
 #include "crypto/sign.h"
 #include "crypto/unexportable_key.h"
 #include "crypto/unexportable_key_metrics.h"
-#include "third_party/abseil-cpp/absl/strings/str_format.h"
 #include "third_party/boringssl/src/include/openssl/ec.h"
 
 namespace crypto {
@@ -130,9 +129,10 @@ std::u16string KeyIdToWindowsLabel(base::span<const uint8_t> key_id) {
 template <typename T>
 using SecurityStatusOr = base::expected<T, SECURITY_STATUS>;
 
-// TPM_ALG_SHA256 from the TPM 2.0 specification. Keep this local because the
-// minimized build does not include the Rust TPM parser bindings.
+// TPM algorithm identifiers from the TPM 2.0 specification. Keep these local
+// because the minimized build does not include the Rust TPM parser bindings.
 constexpr DWORD kTpmAlgSha256 = 0x000B;
+constexpr DWORD kTpmAlgRsassa = 0x0014;
 
 template <typename T>
 SecurityStatusOr<void> SetNCryptProperty(NCRYPT_HANDLE handle,
@@ -555,106 +555,9 @@ class AttestationKeyWin : public WinKeyImpl<UnexportableAttestationKey> {
   // UnexportableSigningKey:
   std::optional<std::vector<uint8_t>> SignSlowly(
       base::span<const uint8_t> data) override {
-    base::ScopedBlockingCall scoped_blocking_call(
-        FROM_HERE, base::BlockingType::WILL_BLOCK);
-
-    // 1. Check TBS availability
-    if (!IsTbsAvailable()) {
-      return std::nullopt;
-    }
-
-    // 2. Extract Provider Context and TPM handles
-    ASSIGN_OR_RETURN(TBS_HCONTEXT h_context,
-                     GetTbsContext(GetNCryptKeyHandle(), tpm::TpmCommand::kSign,
-                                   Algorithm()));
-
-    ASSIGN_OR_RETURN(uint32_t sign_handle,
-                     GetTpmPlatformHandle(GetNCryptKeyHandle(),
-                                          tpm::TpmCommand::kSign, Algorithm()));
-
-    // TPM2_Hash command has a strict 1024-byte data limit.
-    // TODO(crbug.com/530828835): Support larger payloads via multi-part hashing
-    // using TPM2_HashSequenceStart, TPM2_SequenceUpdate, and
-    // TPM2_SequenceComplete.
-    if (data.size() > kMaxTpmHashBufferSize) {
-      return std::nullopt;
-    }
-
-    // 3. Submit TPM2_Hash Command
-    tpm::TpmAlg tpm_alg_id = tpm::TPM_ALG_NULL;
-    switch (Algorithm()) {
-      case SignatureVerifier::SignatureAlgorithm::RSA_PKCS1_SHA256:
-        tpm_alg_id = tpm::TPM_ALG_SHA256;
-        break;
-      case SignatureVerifier::SignatureAlgorithm::ECDSA_SHA256:
-        // Windows Platform Crypto Provider (PCP) and NCrypt AIK providers
-        // restrict ECDSA attestation key signature hashing to SHA-1
-        // (tpm::TPM_ALG_SHA1) rather than SHA-256, even when the key algorithm
-        // is NIST P-256 (ECDSA_SHA256). We must instruct TPM2_Hash to generate
-        // a SHA-1 ticket so the TPM2_Sign command succeeds.
-        //
-        // TODO(crbug.com/531590259): Actually support ECDSA_SHA256 keys by
-        // implementing key creation in the TPM. If TPM-native key creation is
-        // ever extended to general signing keys, a Finch experiment will be
-        // mandatory to avoid breaking active keys.
-        tpm_alg_id = tpm::TPM_ALG_SHA1;
-        break;
-      default:
-        return std::nullopt;
-    }
-
-    // Attestation Identity Keys (AIKs) in Windows Platform Crypto Provider
-    // (PCP) belong to the Endorsement hierarchy (`TPM_RH_ENDORSEMENT`),
-    // unlike standard storage keys which use `TPM_RH_OWNER`. Therefore, the
-    // ticket produced by TPM2_Hash MUST specify the endorsement hierarchy
-    // handle so that TPM2_Sign can consume it for an attestation key.
-    std::vector<uint8_t> hash_cmd =
-        tpm::BuildHashCommand(data, tpm_alg_id, tpm::TPM_RH_ENDORSEMENT);
-
-    ASSIGN_OR_RETURN(
-        std::vector<uint8_t> hash_resp,
-        SubmitTbsCommand(h_context, tpm::TpmCommand::kHash, hash_cmd,
-                         kMaxTpmHashBufferSize, Algorithm()));
-
-    // 4. Parse TPM2_Hash Response
-    const tpm::TpmParseErrorOr<tpm::HashResponse> hash_parsed_or_error =
-        tpm::ParseHashResponse(hash_resp);
-    RecordTpmParseMetrics(hash_parsed_or_error);
-
-    ASSIGN_OR_RETURN(tpm::HashResponse hash_parsed,
-                     std::move(hash_parsed_or_error),
-                     [](const auto&) { return std::nullopt; });
-
-    // 5. Submit TPM2_Sign Command
-    // Attestation Identity Keys (AIKs) are restricted signing keys whose
-    // signature scheme is fixed in the key's public template upon creation.
-    // Per TPM 2.0 Part 3 Section 19.2 (TPM2_Sign), `inScheme` MUST be set to
-    // `TPM_ALG_NULL` for restricted keys so the TPM uses the scheme defined in
-    // the key object itself.
-    //
-    // TODO(crbug.com/530828835): Remove this parameter from the API if we
-    // always need to pass NULL anyway, as the low-level Rust API can just
-    // always write it unconditionally.
-    std::vector<uint8_t> sign_cmd = tpm::BuildSignCommand(
-        sign_handle, hash_parsed.digest, tpm::TPM_ALG_NULL, tpm_alg_id,
-        hash_parsed.validation_ticket);
-
-    ASSIGN_OR_RETURN(
-        std::vector<uint8_t> sign_resp,
-        SubmitTbsCommand(h_context, tpm::TpmCommand::kSign, sign_cmd,
-                         kMaxTpmResponseSize, Algorithm()));
-
-    // 6. Parse TPM2_Sign Response
-    const tpm::TpmParseErrorOr<tpm::SignResponse> sign_parsed_or_error =
-        tpm::ParseSignResponse(sign_resp);
-    RecordTpmParseMetrics(sign_parsed_or_error);
-
-    ASSIGN_OR_RETURN(tpm::SignResponse sign_parsed,
-                     std::move(sign_parsed_or_error),
-                     [](const auto&) { return std::nullopt; });
-
-    // 7. Normalize signature format (DER for ECDSA, raw for RSA)
-    return tpm::ParseTpmSignature(sign_parsed.signature);
+    // TODO(crbug.com/530828835): Implement.
+    NOTIMPLEMENTED();
+    return std::nullopt;
   }
 
   bool SupportsTls13() override {
@@ -800,7 +703,7 @@ class UnexportableKeyProviderWin : public UnexportableKeyProvider {
         // the key to use RSASSA with SHA-256 for signing and certification.
         RETURN_IF_ERROR(
             SetNCryptProperty(key.get(), NCRYPT_PCP_RSA_SCHEME_PROPERTY,
-                              static_cast<DWORD>(tpm::TPM_ALG_RSASSA)),
+                              kTpmAlgRsassa),
             [&](SECURITY_STATUS status) {
               LogTPMOperationError(creation_operation, status, algo);
               return std::nullopt;
@@ -809,7 +712,7 @@ class UnexportableKeyProviderWin : public UnexportableKeyProvider {
         RETURN_IF_ERROR(
             SetNCryptProperty(key.get(),
                               NCRYPT_PCP_RSA_SCHEME_HASH_ALG_PROPERTY,
-                              static_cast<DWORD>(tpm::TPM_ALG_SHA256)),
+                              kTpmAlgSha256),
             [&](SECURITY_STATUS status) {
               LogTPMOperationError(creation_operation, status, algo);
               return std::nullopt;
