@@ -257,7 +257,6 @@ std::unique_ptr<URLRequestContext> BuildURLRequestContext(
         std::erase_if(
             config.supported_named_groups, [](const SSLNamedGroupInfo& g) {
               return g.group_id == SSL_GROUP_X25519_MLKEM768 ||
-                     g.group_id == SSL_GROUP_X25519_KYBER768_DRAFT00 ||
                      g.group_id == SSL_GROUP_MLKEM1024;
             });
         return config;
