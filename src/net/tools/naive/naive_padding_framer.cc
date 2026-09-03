@@ -98,21 +98,22 @@ int NaivePaddingFramer::Write(const char* payload_buf,
                               int padding_size,
                               char* padded,
                               int padded_capacity,
-                              int& payload_consumed_len) {
+                              int* payload_consumed_len) {
   CHECK_GE(payload_buf_len, 0);
   CHECK_LE(padding_size, max_padding_size());
   CHECK_GE(padding_size, 0);
+  CHECK(payload_consumed_len);
 
-  payload_consumed_len = std::min(
+  *payload_consumed_len = std::min(
       payload_buf_len, padded_capacity - frame_header_size() - padding_size);
   int padded_buf_len =
-      frame_header_size() + payload_consumed_len + padding_size;
+      frame_header_size() + *payload_consumed_len + padding_size;
 
-  padded[0] = payload_consumed_len / 256;
-  padded[1] = payload_consumed_len % 256;
+  padded[0] = *payload_consumed_len / 256;
+  padded[1] = *payload_consumed_len % 256;
   padded[2] = padding_size;
-  std::memcpy(padded + frame_header_size(), payload_buf, payload_consumed_len);
-  std::memset(padded + frame_header_size() + payload_consumed_len, '\0',
+  std::memcpy(padded + frame_header_size(), payload_buf, *payload_consumed_len);
+  std::memset(padded + frame_header_size() + *payload_consumed_len, '\0',
               padding_size);
 
   if (num_written_frames_ < std::numeric_limits<int>::max() - 1) {
