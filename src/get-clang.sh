@@ -33,6 +33,60 @@ if [ ! -d third_party/llvm-build/Release+Asserts/bin ]; then
   curl "$clang_url" | tar xJf - -C third_party/llvm-build/Release+Asserts
 fi
 
+# Android compiler-rt is shipped separately from the Clang package. Clang 24
+# looks for builtins in a target-triple directory, while the runtime archive
+# keeps the Android libraries under lib/linux.
+if [ "$target_os" = android ]; then
+  case "$target_cpu" in
+    arm64)
+      android_runtime_arch=aarch64
+      android_target_triple=aarch64-unknown-linux-android
+    ;;
+    arm)
+      android_runtime_arch=arm
+      android_target_triple=armv7-unknown-linux-androideabi
+    ;;
+    x64)
+      android_runtime_arch=x86_64
+      android_target_triple=x86_64-unknown-linux-android
+    ;;
+    x86)
+      android_runtime_arch=i686
+      android_target_triple=i686-unknown-linux-android
+    ;;
+    riscv64)
+      android_runtime_arch=riscv64
+      android_target_triple=riscv64-unknown-linux-android
+    ;;
+    *)
+      echo "Unsupported Android target_cpu: $target_cpu" >&2
+      exit 1
+    ;;
+  esac
+
+  clang_major=$(printf '%s' "$CLANG_REVISION" | sed 's/^llvmorg-\([0-9][0-9]*\).*/\1/')
+  clang_lib="third_party/llvm-build/Release+Asserts/lib/clang/$clang_major/lib"
+  android_builtins="libclang_rt.builtins-$android_runtime_arch-android.a"
+  android_builtins_path="$clang_lib/linux/$android_builtins"
+  if [ ! -f "$android_builtins_path" ]; then
+    android_runtime_path="clang-android-runtime-library-$CLANG_REVISION.tar.xz"
+    android_runtime_url="https://commondatastorage.googleapis.com/chromium-browser-clang/Linux_x64/$android_runtime_path"
+    curl -fL "$android_runtime_url" | tar xJf - -C third_party/llvm-build/Release+Asserts
+  fi
+  if [ ! -f "$android_builtins_path" ]; then
+    echo "Missing Android Clang builtins: $android_builtins_path" >&2
+    exit 1
+  fi
+
+  android_api=21
+  while [ "$android_api" -le 50 ]; do
+    android_target_dir="$clang_lib/$android_target_triple$android_api"
+    mkdir -p "$android_target_dir"
+    ln -sf "../linux/$android_builtins" "$android_target_dir/libclang_rt.builtins.a"
+    android_api=$((android_api + 1))
+  done
+fi
+
 # sccache
 if [ "$host_os" = win -a ! -f ~/.cargo/bin/sccache.exe ]; then
   sccache_url="https://github.com/mozilla/sccache/releases/download/0.2.12/sccache-0.2.12-x86_64-pc-windows-msvc.tar.gz"
