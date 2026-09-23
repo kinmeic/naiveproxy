@@ -4,6 +4,12 @@
 
 import("//third_party/jni_zero/jni_zero.gni")
 
+config("jni_zero_chromium_defines") {
+  if (build_with_chromium) {
+    defines = [ "JNI_ZERO_BUILD_WITH_CHROMIUM" ]
+  }
+}
+
 config("jni_include_dir") {
   include_dirs = [ jni_headers_dir ]
 }
