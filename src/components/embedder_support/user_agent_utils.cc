@@ -940,10 +940,8 @@ std::string GetAndroidOSInfo(
 }
 
 std::string GetAndroidDesktopCpuArchitecture() {
-  // TODO(crbug.com/433345971): Avoid hardcoding x86 when flag is disabled.
-  if (base::FeatureList::IsEnabled(blink::features::kAndroidDesktopUACPUArch)) {
-    return GetPosixCpuArchitecture();
-  }
+  // This reduced source set omits the Blink feature definition. Match its
+  // disabled-by-default behavior until that feature is imported.
   return "x86";
 }
 #endif  // BUILDFLAG(IS_ANDROID)
