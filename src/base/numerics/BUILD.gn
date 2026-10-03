@@ -6,7 +6,7 @@
 # way to facilitate pulling it into various third-party projects. So, this
 # file is here to protect against accidentally introducing external
 # dependencies or depending on internal implementation details.
-source_set("numerics") {
+source_set("base_numerics") {
   sources = [
     "basic_ops_impl.h",
     "checked_math_impl.h",
