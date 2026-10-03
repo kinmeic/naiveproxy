@@ -1826,8 +1826,6 @@ component("base") {
       "win/delayload_helpers.h",
       "win/elevation_util.cc",
       "win/elevation_util.h",
-      "win/embedded_i18n/language_selector.cc",
-      "win/embedded_i18n/language_selector.h",
       "win/enum_variant.cc",
       "win/enum_variant.h",
       "win/event_trace_consumer.h",
