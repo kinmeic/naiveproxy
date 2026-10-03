@@ -568,8 +568,6 @@ component("net") {
     "first_party_sets/first_party_sets_validator.h",
     "first_party_sets/global_first_party_sets.cc",
     "first_party_sets/global_first_party_sets.h",
-    "first_party_sets/local_set_declaration.cc",
-    "first_party_sets/local_set_declaration.h",
     "first_party_sets/sets_mutation.cc",
     "first_party_sets/sets_mutation.h",
     "http/alternative_service.cc",
