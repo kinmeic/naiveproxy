@@ -76,6 +76,8 @@ flags="$flags"'
   enable_quic_proxy_support=true
   enable_disk_cache_sql_backend=false
 
+  use_nss_client_certs=false
+  use_nss_server_certs=false
   use_nss_certs=false
 
   enable_backup_ref_ptr_support=false
