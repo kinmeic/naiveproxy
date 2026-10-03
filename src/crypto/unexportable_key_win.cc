@@ -35,6 +35,7 @@
 #include "crypto/keypair.h"
 #include "crypto/random.h"
 #include "crypto/sign.h"
+#include "crypto/signature_verifier.h"
 #include "crypto/unexportable_key.h"
 #include "crypto/unexportable_key_metrics.h"
 #include "third_party/boringssl/src/include/openssl/ec.h"
