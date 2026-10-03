@@ -1,0 +1,148 @@
+/*
+ * Copyright (C) 2019 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#ifndef SRC_TRACE_PROCESSOR_IMPORTERS_PROTO_TRACK_EVENT_PARSER_H_
+#define SRC_TRACE_PROCESSOR_IMPORTERS_PROTO_TRACK_EVENT_PARSER_H_
+
+#include <cstdint>
+#include <vector>
+
+#include "perfetto/protozero/field.h"
+#include "src/trace_processor/importers/common/parser_types.h"
+#include "src/trace_processor/importers/common/slice_tracker.h"
+#include "src/trace_processor/importers/proto/active_chrome_processes_tracker.h"
+#include "src/trace_processor/importers/proto/chrome_string_lookup.h"
+#include "src/trace_processor/importers/proto/track_event_extension_parser.h"
+#include "src/trace_processor/storage/trace_storage.h"
+#include "src/trace_processor/util/proto_to_args_parser.h"
+
+namespace Json {
+class Value;
+}
+
+namespace perfetto::trace_processor {
+
+// Field numbers to be added to args table automatically via reflection
+//
+class PacketSequenceStateGeneration;
+class TraceProcessorContext;
+class TrackEventTracker;
+class TrackEventEventImporter;
+class DummyMemoryMapping;
+
+class TrackEventParser {
+ public:
+  TrackEventParser(TrackEventExtensionParserContext*,
+                   TraceProcessorContext*,
+                   TrackEventTracker*);
+
+  void ParseTrackDescriptor(int64_t packet_timestamp,
+                            protozero::ConstBytes,
+                            uint32_t packet_sequence_id);
+  UniquePid ParseProcessDescriptor(int64_t packet_timestamp,
+                                   protozero::ConstBytes);
+  UniqueTid ParseThreadDescriptor(protozero::ConstBytes, bool);
+
+  void ParseTrackEvent(int64_t ts,
+                       const TrackEventData* event_data,
+                       protozero::ConstBytes,
+                       uint32_t packet_sequence_id);
+
+  void OnEventsFullyExtracted();
+
+ private:
+  friend class TrackEventEventImporter;
+
+  // Consecutive events tend to carry the same fields, so the field looked
+  // up last is remembered, including a field without a parser. Parsers are
+  // only ever added, so a changed count means the answer may have changed.
+  TrackEventExtensionParser* ParserForField(uint32_t field_id) {
+    const auto& by_field = extension_parser_context_->parsers_by_field;
+    if (field_id != last_parser_field_id_ ||
+        by_field.size() != last_parser_count_) {
+      auto* it = by_field.Find(field_id);
+      last_parser_ = it ? *it : nullptr;
+      last_parser_field_id_ = field_id;
+      last_parser_count_ = by_field.size();
+    }
+    return last_parser_;
+  }
+
+  // The TrackEvent descriptor's index in the pool, resolved once.
+  std::optional<uint32_t> TrackEventDescriptorIdx();
+
+  void ParseChromeProcessDescriptor(UniquePid, protozero::ConstBytes);
+  void ParseChromeThreadDescriptor(UniqueTid, protozero::ConstBytes);
+  void ParseCounterDescriptor(TrackId, protozero::ConstBytes);
+  void AddActiveProcess(int64_t packet_timestamp, int32_t pid);
+  DummyMemoryMapping* GetOrCreateInlineCallstackDummyMapping();
+
+  // Reflection-based proto TrackEvent field parser.
+  util::ProtoToArgsParser args_parser_;
+
+  TraceProcessorContext* context_;
+  TrackEventTracker* track_event_tracker_;
+
+  const StringId counter_name_thread_time_id_;
+  const StringId counter_name_thread_instruction_count_id_;
+  const StringId job_scheduler_job_name_args_key_id_;
+  const StringId raw_legacy_event_id_;
+  const StringId legacy_event_passthrough_utid_id_;
+  const StringId legacy_event_category_key_id_;
+  const StringId legacy_event_name_key_id_;
+  const StringId legacy_event_phase_key_id_;
+  const StringId legacy_event_duration_ns_key_id_;
+  const StringId legacy_event_thread_timestamp_ns_key_id_;
+  const StringId legacy_event_thread_duration_ns_key_id_;
+  const StringId legacy_event_thread_instruction_count_key_id_;
+  const StringId legacy_event_thread_instruction_delta_key_id_;
+  const StringId legacy_event_use_async_tts_key_id_;
+  const StringId legacy_event_unscoped_id_key_id_;
+  const StringId legacy_event_global_id_key_id_;
+  const StringId legacy_event_local_id_key_id_;
+  const StringId legacy_event_id_scope_key_id_;
+  const StringId legacy_event_bind_id_key_id_;
+  const StringId legacy_event_bind_to_enclosing_key_id_;
+  const StringId legacy_event_flow_direction_key_id_;
+  const StringId flow_direction_value_in_id_;
+  const StringId flow_direction_value_out_id_;
+  const StringId flow_direction_value_inout_id_;
+  const StringId chrome_legacy_ipc_class_args_key_id_;
+  const StringId chrome_legacy_ipc_line_args_key_id_;
+  const StringId chrome_host_app_package_name_id_;
+  const StringId chrome_crash_trace_id_name_id_;
+  const StringId chrome_process_label_flat_key_id_;
+  const StringId chrome_process_type_id_;
+  const StringId event_category_key_id_;
+  const StringId event_name_key_id_;
+  const StringId correlation_id_key_id_;
+  const StringId legacy_trace_source_id_key_id_;
+  const StringId callsite_id_key_id_;
+  const StringId end_callsite_id_key_id_;
+
+  TrackEventExtensionParserContext* extension_parser_context_;
+  ChromeStringLookup chrome_string_lookup_;
+  std::optional<uint32_t> track_event_descriptor_idx_;
+  TrackEventExtensionParser* last_parser_ = nullptr;
+  uint32_t last_parser_field_id_ = 0;
+  size_t last_parser_count_ = 0;
+  ActiveChromeProcessesTracker active_chrome_processes_tracker_;
+  DummyMemoryMapping* inline_callstack_dummy_mapping_ = nullptr;
+};
+
+}  // namespace perfetto::trace_processor
+
+#endif  // SRC_TRACE_PROCESSOR_IMPORTERS_PROTO_TRACK_EVENT_PARSER_H_

@@ -1,0 +1,504 @@
+--
+-- Copyright 2024 The Android Open Source Project
+--
+-- Licensed under the Apache License, Version 2.0 (the "License");
+-- you may not use this file except in compliance with the License.
+-- You may obtain a copy of the License at
+--
+--     https://www.apache.org/licenses/LICENSE-2.0
+--
+-- Unless required by applicable law or agreed to in writing, software
+-- distributed under the License is distributed on an "AS IS" BASIS,
+-- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-- See the License for the specific language governing permissions and
+-- limitations under the License.
+
+INCLUDE PERFETTO MODULE android.device;
+
+INCLUDE PERFETTO MODULE wattson.utils;
+
+-- Device specific info for deep idle time offsets
+CREATE PERFETTO TABLE _device_cpu_deep_idle_offsets AS
+WITH
+  data(device, cpu, offset_ns) AS (
+    SELECT *
+    FROM (
+      VALUES
+        ("Tensor", 0, 0), ("Tensor", 1, 0), ("Tensor", 2, 0), ("Tensor", 3, 0),
+        (
+          "Tensor",
+          4,
+          0
+        ), ("Tensor", 5, 0), ("Tensor", 6, 200000), ("Tensor", 7, 200000),
+        (
+          "monaco",
+          0,
+          450000
+        ), ("monaco", 1, 450000), ("monaco", 2, 450000), ("monaco", 3, 450000),
+        (
+          "Tensor G4",
+          0,
+          0
+        ), ("Tensor G4", 1, 0), ("Tensor G4", 2, 0), ("Tensor G4", 3, 0),
+        (
+          "Tensor G4",
+          4,
+          110000
+        ), ("Tensor G4", 5, 110000), ("Tensor G4", 6, 110000),
+        (
+          "Tensor G4",
+          7,
+          400000
+        ), ("Tensor G5", 0, 0), ("Tensor G5", 1, 0), ("Tensor G5", 2, 0),
+        (
+          "Tensor G5",
+          3,
+          0
+        ), ("Tensor G5", 4, 0), ("Tensor G5", 5, 0), ("Tensor G5", 6, 0),
+        (
+          "Tensor G5",
+          7,
+          0
+        ), ("Tensor G6", 0, 0), ("Tensor G6", 1, 0), ("Tensor G6", 2, 0),
+        (
+          "Tensor G6",
+          3,
+          0
+        ), ("Tensor G6", 4, 0), ("Tensor G6", 5, 0), ("Tensor G6", 6, 0),
+        (
+          "neo",
+          0,
+          100000
+        ), ("neo", 1, 100000), ("neo", 2, 100000), ("neo", 3, 100000),
+        (
+          "SXR2230P",
+          0,
+          0
+        ), ("SXR2230P", 1, 0), ("SXR2230P", 2, 0), ("SXR2230P", 3, 0),
+        (
+          "SXR2230P",
+          4,
+          0
+        ), ("SXR2230P", 5, 0), ("MT6858", 0, 0), ("MT6858", 1, 0),
+        (
+          "MT6858",
+          2,
+          0
+        ), ("MT6858", 3, 0), ("MT6858", 4, 0), ("MT6858", 5, 0),
+        (
+          "MT6858",
+          6,
+          0
+        ), ("MT6858", 7, 0), ("MT6897", 0, 0), ("MT6897", 1, 0),
+        (
+          "MT6897",
+          2,
+          0
+        ), ("MT6897", 3, 0), ("MT6897", 4, 0), ("MT6897", 5, 0),
+        (
+          "MT6897",
+          6,
+          0
+        ), ("MT6897", 7, 0), ("SM8750", 0, 0), ("SM8750", 1, 0),
+        (
+          "SM8750",
+          2,
+          0
+        ), ("SM8750", 3, 0), ("SM8750", 4, 0), ("SM8750", 5, 0),
+        (
+          "SM8750",
+          6,
+          0
+        ), ("SM8750", 7, 0)
+    ) AS _values
+  )
+SELECT * FROM data;
+
+CREATE PERFETTO TABLE _linux_soc_compatible_map AS
+WITH
+  data(soc_compatible, wattson_device) AS (
+    SELECT *
+    FROM (
+      VALUES
+        ("google,gs101", "Tensor"),
+        ("google,zuma-pro", "Tensor G4"),
+        ("google,lga", "Tensor G5"),
+        ("google,malibu", "Tensor G6"),
+        ("qcom,sm8750", "SM8750")
+    ) AS _values
+  )
+SELECT * FROM data;
+
+CREATE PERFETTO TABLE _linux_board_compatible_map AS
+WITH
+  data(board_compatible, wattson_device) AS (
+    SELECT *
+    FROM (
+      VALUES
+        ("google,gs101-oriole", "Tensor"),
+        ("google,gs101-raven", "Tensor"),
+        ("google,GS101 Oriole", "Tensor"),
+        ("google,GS101 Raven", "Tensor"),
+        ("google,GS101 BLUEJAY", "Tensor"),
+        ("google,ZUMA PRO CAIMAN", "Tensor G4"),
+        ("google,ZUMA PRO KOMODO", "Tensor G4"),
+        ("google,ZUMA PRO TOKAY", "Tensor G4"),
+        ("google,ZUMA PRO TEGU", "Tensor G4"),
+        ("google,ZUMA PRO COMET", "Tensor G4"),
+        ("google,ZUMA PRO STALLION", "Tensor G4"),
+        ("google,lga-frankel", "Tensor G5"),
+        ("google,lga-blazer", "Tensor G5"),
+        ("google,lga-mustang", "Tensor G5"),
+        ("google,lga-rango", "Tensor G5"),
+        ("google,malibu-cubs", "Tensor G6"),
+        ("google,malibu-grizzly", "Tensor G6"),
+        ("google,malibu-kodiak", "Tensor G6"),
+        ("qcom,sm8750-mtp", "SM8750"),
+        ("qcom,sm8750-qrd", "SM8750")
+    ) AS _values
+  )
+SELECT * FROM data;
+
+CREATE PERFETTO TABLE _wattson_device_map AS
+WITH
+  data(device, wattson_device) AS (
+    SELECT *
+    FROM (
+      VALUES
+        ("oriole", "Tensor"),
+        ("raven", "Tensor"),
+        ("bluejay", "Tensor"),
+        ("eos", "monaco"),
+        ("aurora", "monaco")
+    ) AS _values
+  )
+SELECT * FROM data;
+
+-- Mapping for SoC model aliases (i.e. different name for same SoC)
+CREATE PERFETTO TABLE _wattson_soc_aliases AS
+WITH
+  data(alias, wattson_device) AS (
+    SELECT * FROM (VALUES ("SAR1130P", "neo")) AS _values
+  )
+SELECT * FROM data;
+
+CREATE PERFETTO TABLE _wattson_device AS
+WITH
+  dt_compatibles AS (
+    SELECT id, str_value AS compatible
+    FROM metadata
+    WHERE
+      name = 'device_tree_compatible'
+      AND (machine_id = 0 OR machine_id IS NULL)
+    ORDER BY
+      id DESC
+  ),
+  soc_model AS (
+    SELECT
+      coalesce(
+        -- Get guest model from metadata, which takes precedence if set
+        (
+          SELECT coalesce(map.wattson_device, m.str_value)
+          FROM metadata AS m
+          LEFT JOIN _wattson_soc_aliases AS map
+            ON map.alias = m.str_value
+          WHERE
+            m.name = 'android_guest_soc_model'
+          LIMIT 1
+        ),
+        -- Get model from metadata
+        (
+          SELECT coalesce(map.wattson_device, m.str_value)
+          FROM metadata AS m
+          LEFT JOIN _wattson_soc_aliases AS map
+            ON map.alias = m.str_value
+          WHERE
+            m.name = 'android_soc_model'
+          LIMIT 1
+        ),
+        -- Get device name from metadata and map it to model
+        (
+          SELECT wattson_device
+          FROM _wattson_device_map AS map
+          JOIN android_device_name AS ad
+            ON ad.name = map.device
+        ),
+        -- First check the Linux device tree SoC compatibles
+        (
+          SELECT map.wattson_device
+          FROM dt_compatibles AS dt
+          JOIN _linux_soc_compatible_map AS map
+            ON dt.compatible = map.soc_compatible
+          ORDER BY
+            dt.id DESC
+          LIMIT 1
+        ),
+        -- Then check the Linux device tree board compatibles
+        (
+          SELECT map.wattson_device
+          FROM dt_compatibles AS dt
+          JOIN _linux_board_compatible_map AS map
+            ON dt.compatible = map.board_compatible
+          ORDER BY
+            dt.id DESC
+          LIMIT 1
+        )
+      ) AS name
+  )
+-- Once model is obtained, check to see if the model is supported by Wattson
+-- via checking if model is within a key-value pair mapping
+SELECT DISTINCT name
+FROM soc_model
+JOIN _device_cpu_deep_idle_offsets AS map
+  ON map.device = name;
+
+-- Device specific mapping from CPU to policy
+CREATE PERFETTO TABLE _cpu_to_policy_map AS
+WITH
+  data(device, cpu, policy) AS (
+    SELECT *
+    FROM (
+      VALUES
+        ("monaco", 0, 0), ("monaco", 1, 0), ("monaco", 2, 0), ("monaco", 3, 0),
+        (
+          "Tensor",
+          0,
+          0
+        ), ("Tensor", 1, 0), ("Tensor", 2, 0), ("Tensor", 3, 0),
+        (
+          "Tensor",
+          4,
+          4
+        ), ("Tensor", 5, 4), ("Tensor", 6, 6), ("Tensor", 7, 6),
+        (
+          "Tensor G4",
+          0,
+          0
+        ), ("Tensor G4", 1, 0), ("Tensor G4", 2, 0), ("Tensor G4", 3, 0),
+        (
+          "Tensor G4",
+          4,
+          4
+        ), ("Tensor G4", 5, 4), ("Tensor G4", 6, 4), ("Tensor G4", 7, 7),
+        (
+          "Tensor G5",
+          0,
+          0
+        ), ("Tensor G5", 1, 0), ("Tensor G5", 2, 2), ("Tensor G5", 3, 2),
+        (
+          "Tensor G5",
+          4,
+          2
+        ), ("Tensor G5", 5, 5), ("Tensor G5", 6, 5), ("Tensor G5", 7, 7),
+        (
+          "Tensor G6",
+          0,
+          0
+        ), ("Tensor G6", 1, 0), ("Tensor G6", 2, 2), ("Tensor G6", 3, 2),
+        (
+          "Tensor G6",
+          4,
+          2
+        ), ("Tensor G6", 5, 2), ("Tensor G6", 6, 6), ("neo", 0, 0),
+        (
+          "neo",
+          1,
+          0
+        ), ("neo", 2, 0), ("neo", 3, 0), ("SXR2230P", 0, 0), ("SXR2230P", 1, 0),
+        (
+          "SXR2230P",
+          2,
+          2
+        ), ("SXR2230P", 3, 2), ("SXR2230P", 4, 2), ("SXR2230P", 5, 2),
+        (
+          "MT6858",
+          0,
+          0
+        ), ("MT6858", 1, 0), ("MT6858", 2, 0), ("MT6858", 3, 0),
+        (
+          "MT6858",
+          4,
+          4
+        ), ("MT6858", 5, 4), ("MT6858", 6, 4), ("MT6858", 7, 4),
+        (
+          "MT6897",
+          0,
+          0
+        ), ("MT6897", 1, 0), ("MT6897", 2, 0), ("MT6897", 3, 0),
+        (
+          "MT6897",
+          4,
+          4
+        ), ("MT6897", 5, 4), ("MT6897", 6, 4), ("MT6897", 7, 7),
+        (
+          "SM8750",
+          0,
+          0
+        ), ("SM8750", 1, 0), ("SM8750", 2, 0), ("SM8750", 3, 0),
+        (
+          "SM8750",
+          4,
+          0
+        ), ("SM8750", 5, 0), ("SM8750", 6, 6), ("SM8750", 7, 6)
+    ) AS _values
+  )
+SELECT * FROM data;
+
+-- Prefilter table based on device
+CREATE PERFETTO TABLE _dev_cpu_policy_map AS
+SELECT cpu, policy
+FROM _cpu_to_policy_map AS cp_map
+JOIN _wattson_device AS device
+  ON cp_map.device = device.name
+ORDER BY
+  cpu;
+
+-- Identifies unique policies on this device
+CREATE PERFETTO TABLE _device_policies AS
+SELECT DISTINCT policy FROM _dev_cpu_policy_map;
+
+-- Defines bitmasks for each CPU where bits are set for all cores sharing the same
+-- cpufreq policy. This is used to determine if a cluster is active (any core on)
+-- to correctly attribute shared static power.
+CREATE PERFETTO TABLE _policy_masks AS
+WITH
+  _dev_policies AS (
+    SELECT
+      max(iif(cpu = 0, policy, -1)) AS p0,
+      max(iif(cpu = 1, policy, -1)) AS p1,
+      max(iif(cpu = 2, policy, -1)) AS p2,
+      max(iif(cpu = 3, policy, -1)) AS p3,
+      max(iif(cpu = 4, policy, -1)) AS p4,
+      max(iif(cpu = 5, policy, -1)) AS p5,
+      max(iif(cpu = 6, policy, -1)) AS p6,
+      max(iif(cpu = 7, policy, -1)) AS p7
+    FROM _dev_cpu_policy_map
+  )
+SELECT
+  _policy_mask!(p0, p0, p1, p2, p3, p4, p5, p6, p7) AS m0,
+  _policy_mask!(p1, p0, p1, p2, p3, p4, p5, p6, p7) AS m1,
+  _policy_mask!(p2, p0, p1, p2, p3, p4, p5, p6, p7) AS m2,
+  _policy_mask!(p3, p0, p1, p2, p3, p4, p5, p6, p7) AS m3,
+  _policy_mask!(p4, p0, p1, p2, p3, p4, p5, p6, p7) AS m4,
+  _policy_mask!(p5, p0, p1, p2, p3, p4, p5, p6, p7) AS m5,
+  _policy_mask!(p6, p0, p1, p2, p3, p4, p5, p6, p7) AS m6,
+  _policy_mask!(p7, p0, p1, p2, p3, p4, p5, p6, p7) AS m7
+FROM _dev_policies;
+
+-- Devices that require using devfreq
+CREATE PERFETTO TABLE _use_devfreq AS
+WITH
+  data(device) AS (
+    SELECT *
+    FROM (VALUES ("Tensor G4"), ("Tensor G5"), ("Tensor G6")) AS _values
+  )
+SELECT * FROM data;
+
+-- Creates non-empty table if device needs devfreq
+CREATE PERFETTO TABLE _use_devfreq_for_calc AS
+SELECT TRUE AS devfreq_necessary
+FROM _use_devfreq AS d
+JOIN _wattson_device AS device
+  ON d.device = device.name;
+
+-- Creates empty table if device needs devfreq; inverse of _use_devfreq_for_calc
+CREATE PERFETTO TABLE _skip_devfreq_for_calc AS
+SELECT FALSE AS devfreq_necessary
+WHERE
+  NOT EXISTS (SELECT * FROM _use_devfreq_for_calc);
+
+-- Devices that require idle state mapping
+CREATE PERFETTO TABLE _idle_state_map AS
+WITH
+  data(device, nominal_idle, override_idle) AS (
+    SELECT *
+    FROM (
+      VALUES
+        ("MT6858", 4294967295, -1), ("MT6858", 0, 0), ("MT6858", 1, 1),
+        (
+          "MT6858",
+          2,
+          1
+        ), ("MT6858", 3, 1), ("MT6858", 4, 1), ("MT6858", 5, 1),
+        (
+          "MT6897",
+          4294967295,
+          -1
+        ), ("MT6897", 0, 0), ("MT6897", 1, 1), ("MT6897", 2, 1),
+        (
+          "MT6897",
+          3,
+          1
+        ), ("MT6897", 4, 1), ("MT6897", 5, 1), ("MT6897", 6, 1),
+        (
+          "MT6897",
+          7,
+          1
+        ), ("MT6897", 8, 1), ("neo", 4294967295, -1), ("neo", 0, 0),
+        (
+          "neo",
+          1,
+          1
+        ), ("neo", 2, 1), ("SXR2230P", 4294967295, -1), ("SXR2230P", 0, 0),
+        (
+          "SXR2230P",
+          1,
+          1
+        ), ("SXR2230P", 2, 1)
+    ) AS _values
+  )
+SELECT * FROM data;
+
+-- idle_mapping override filtered for device
+CREATE PERFETTO TABLE _idle_state_map_override AS
+SELECT nominal_idle, override_idle
+FROM _idle_state_map AS idle_map
+JOIN _wattson_device AS device
+  ON idle_map.device = device.name;
+
+-- Get the device specific deepest idle state if defined, otherwise use 1 as the
+-- deepest idle state
+CREATE PERFETTO TABLE _deepest_idle AS
+SELECT
+  coalesce((SELECT max(override_idle) FROM _idle_state_map_override), 1) AS idle;
+
+-- Specify which device-cpu combination has 2D dependency that votes by
+-- frequency (as opposed to the default, vote by power)
+CREATE PERFETTO TABLE _vote_by_freq AS
+WITH
+  data(device, cpu) AS (
+    SELECT *
+    FROM (
+      VALUES
+        ("Tensor G5", 5), ("Tensor G5", 6), ("Tensor G5", 7), ("Tensor G6", 2),
+        (
+          "Tensor G6",
+          3
+        ), ("Tensor G6", 4), ("Tensor G6", 5), ("Tensor G6", 6)
+    ) AS _values
+  )
+SELECT * FROM data;
+
+-- Gets all CPUs on device and whether the CPU vote is be freq or power
+CREATE PERFETTO TABLE _dev_vote_by_freq AS
+WITH
+  _filtered_vote_by_freq AS (
+    SELECT cpu, 1 AS vote_by_freq
+    FROM _vote_by_freq AS v
+    JOIN _wattson_device AS device
+      ON v.device = device.name
+  )
+SELECT m.cpu, coalesce(v.vote_by_freq, 0) AS vote_by_freq
+FROM _dev_cpu_policy_map AS m
+LEFT JOIN _filtered_vote_by_freq AS v USING (cpu)
+ORDER BY
+  cpu;
+
+-- Device specific mapping to GPU ID
+CREATE PERFETTO TABLE _gpuid_map AS
+WITH
+  data(device, gpu_id) AS (
+    SELECT *
+    FROM (VALUES ("Tensor G5", 0), ("Tensor G6", 0), ("Tensor", 1)) AS _values
+  )
+SELECT * FROM data;
