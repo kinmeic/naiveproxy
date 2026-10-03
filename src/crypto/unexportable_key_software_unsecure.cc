@@ -28,11 +28,15 @@ namespace {
 // Keep the minimized build independent of the omitted Rust TPM bridge.
 constexpr uint32_t kTpmGeneratedValue = 0xFF544347;
 constexpr uint16_t kTpmStAttestCertify = 0x8017;
+constexpr uint16_t kTpmAlgEcc = 0x0023;
+constexpr uint16_t kTpmAlgRsa = 0x0001;
 constexpr uint16_t kTpmAlgSha256 = 0x000B;
+constexpr uint16_t kTpmAlgNull = 0x0010;
 constexpr uint16_t kTpmAlgEcdsa = 0x0018;
 constexpr uint16_t kTpmAlgRsassa = 0x0014;
-constexpr std::array<uint8_t, 4> kTpmGeneratedValueBytes = {
-    0xFF, 0x54, 0x43, 0x47};
+constexpr uint16_t kTpmEccNistP256 = 0x0003;
+constexpr std::array<uint8_t, 4> kTpmGeneratedValueBytes = {0xFF, 0x54, 0x43,
+                                                            0x47};
 
 // Small helper to write a TPM2B sized buffer. Consisting of a uint16_t size and
 // payload.
@@ -91,7 +95,7 @@ std::vector<uint8_t> CreateTpm2bAttestationStatement(
   std::array<uint8_t, kNameBufSize> name_buf;
   base::SpanWriter<uint8_t> name_writer(name_buf);
   name_writer.WriteU16BigEndian(kTpmAlgSha256);
-  name_writer.Write(hash::Sha256(signing_key.GetSubjectPublicKeyInfo()));
+  name_writer.Write(hash::Sha256(subject_key));
   CHECK_EQ(name_writer.remaining(), 0u);
 
   WriteTpm2b(attest_writer, name_buf);
@@ -118,16 +122,16 @@ std::vector<uint8_t> CreateTpmtPublic(const keypair::PublicKey& public_key) {
         2 + 2 + 4 + 2 + 2 + 2 + 2 + 2 + (2 + 32) + (2 + 32);
     std::vector<uint8_t> tpmt_public(kEccTpmtPublicSize);
     base::SpanWriter<uint8_t> writer(tpmt_public);
-    writer.WriteEnumBigEndian(tpm::TPM_ALG_ECC);
-    writer.WriteEnumBigEndian(tpm::TPM_ALG_SHA256);
+    writer.WriteU16BigEndian(kTpmAlgEcc);
+    writer.WriteU16BigEndian(kTpmAlgSha256);
     writer.WriteU32BigEndian(kObjectAttributes);
     writer.WriteU16BigEndian(0u);  // authPolicy size (empty)
 
     // TPMS_ECC_PARMS
-    writer.WriteEnumBigEndian(tpm::TPM_ALG_NULL);  // symmetric
-    writer.WriteEnumBigEndian(tpm::TPM_ALG_NULL);  // scheme
-    writer.WriteEnumBigEndian(tpm::TPM_ECC_NIST_P256);
-    writer.WriteEnumBigEndian(tpm::TPM_ALG_NULL);  // kdf
+    writer.WriteU16BigEndian(kTpmAlgNull);  // symmetric
+    writer.WriteU16BigEndian(kTpmAlgNull);  // scheme
+    writer.WriteU16BigEndian(kTpmEccNistP256);
+    writer.WriteU16BigEndian(kTpmAlgNull);  // kdf
 
     // TPMS_ECC_POINT (unique)
     WriteTpm2b(writer, x);
@@ -144,16 +148,16 @@ std::vector<uint8_t> CreateTpmtPublic(const keypair::PublicKey& public_key) {
         2 + 2 + 4 + 2 + 2 + 2 + 2 + 4 + (2 + 256);
     std::vector<uint8_t> tpmt_public(kRsaTpmtPublicSize);
     base::SpanWriter<uint8_t> writer(tpmt_public);
-    writer.WriteEnumBigEndian(tpm::TPM_ALG_RSA);
-    writer.WriteEnumBigEndian(tpm::TPM_ALG_SHA256);
+    writer.WriteU16BigEndian(kTpmAlgRsa);
+    writer.WriteU16BigEndian(kTpmAlgSha256);
     writer.WriteU32BigEndian(kObjectAttributes);
     writer.WriteU16BigEndian(0u);  // authPolicy size (empty)
 
     // TPMS_RSA_PARMS
-    writer.WriteEnumBigEndian(tpm::TPM_ALG_NULL);  // symmetric
-    writer.WriteEnumBigEndian(tpm::TPM_ALG_NULL);  // scheme
-    writer.WriteU16BigEndian(2048u);               // keyBits
-    writer.WriteU32BigEndian(0u);                  // exponent (default 65537)
+    writer.WriteU16BigEndian(kTpmAlgNull);  // symmetric
+    writer.WriteU16BigEndian(kTpmAlgNull);  // scheme
+    writer.WriteU16BigEndian(2048u);        // keyBits
+    writer.WriteU32BigEndian(0u);           // exponent (default 65537)
 
     // TPM2B_PUBLIC_KEY_RSA (unique)
     WriteTpm2b(writer, modulus);
