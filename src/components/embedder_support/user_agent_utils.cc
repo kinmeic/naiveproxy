@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/android/device_info.h"
@@ -51,10 +52,6 @@
 #include <sys/utsname.h>
 #endif
 
-#include <algorithm>
-
-#include "base/containers/span.h"
-#include "base/pickle.h"
 #include "net/http/structured_headers.h"
 
 namespace blink {
@@ -65,36 +62,45 @@ UserAgentBrandVersion::UserAgentBrandVersion(const std::string& ua_brand,
   version = ua_version;
 }
 
-const std::string UserAgentMetadata::SerializeBrandVersionList(
+namespace {
+
+std::string SerializeBrandVersionList(
     const blink::UserAgentBrandList& ua_brand_version_list) {
   net::structured_headers::List brand_version_header =
       net::structured_headers::List();
   for (const UserAgentBrandVersion& brand_version : ua_brand_version_list) {
-    if (brand_version.version.empty()) {
-      brand_version_header.push_back(
-          net::structured_headers::ParameterizedMember(
-              net::structured_headers::Item(brand_version.brand), {}));
-    } else {
-      brand_version_header.push_back(
-          net::structured_headers::ParameterizedMember(
-              net::structured_headers::Item(brand_version.brand),
-              {std::make_pair(
-                  "v", net::structured_headers::Item(brand_version.version))}));
+    net::structured_headers::Parameters params;
+    if (!brand_version.version.empty()) {
+      params.emplace_back("v",
+                          net::structured_headers::Item(brand_version.version));
     }
+    brand_version_header.push_back(net::structured_headers::ParameterizedMember(
+        net::structured_headers::Item(brand_version.brand), std::move(params)));
   }
 
   return net::structured_headers::SerializeList(brand_version_header)
       .value_or("");
 }
 
-const std::string UserAgentMetadata::SerializeBrandFullVersionList() {
+}  // namespace
+
+std::string UserAgentMetadata::SerializeBrandFullVersionList() const {
   return SerializeBrandVersionList(brand_full_version_list);
 }
 
-const std::string UserAgentMetadata::SerializeBrandMajorVersionList() {
+std::string UserAgentMetadata::SerializeBrandMajorVersionList() const {
   return SerializeBrandVersionList(brand_version_list);
 }
+
+std::string UserAgentMetadata::SerializeFormFactors() const {
+  net::structured_headers::List structured;
+  for (const auto& form_factor : form_factors) {
+    structured.emplace_back(net::structured_headers::ParameterizedMember(
+        net::structured_headers::Item(form_factor)));
+  }
+  return net::structured_headers::SerializeList(structured).value_or("");
 }
+}  // namespace blink
 
 namespace embedder_support {
 
