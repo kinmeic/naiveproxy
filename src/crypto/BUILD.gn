@@ -73,8 +73,6 @@ component("crypto") {
     "sha2.h",
     "sign.cc",
     "sign.h",
-    "signature_verifier.cc",
-    "signature_verifier.h",
     "subtle_passkey.cc",
     "subtle_passkey.h",
     "unexportable_key.cc",
