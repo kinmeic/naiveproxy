@@ -9,8 +9,10 @@
 static constexpr std::string empty;
 
 namespace base::android::device_info {
+#if __ANDROID_API__ >= 29
 void Set(const IDeviceInfo& info) {
 }
+#endif
 
 const std::string& gms_version_code() {
   return empty;
