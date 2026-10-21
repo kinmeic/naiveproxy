@@ -71,11 +71,14 @@ std::string SerializeBrandVersionList(
   for (const UserAgentBrandVersion& brand_version : ua_brand_version_list) {
     net::structured_headers::Parameters params;
     if (!brand_version.version.empty()) {
-      params.emplace_back("v",
-                          net::structured_headers::Item(brand_version.version));
+      params.emplace_back("v", net::structured_headers::Item(
+                                   net::structured_headers::Item::string,
+                                   brand_version.version));
     }
     brand_version_header.push_back(net::structured_headers::ParameterizedMember(
-        net::structured_headers::Item(brand_version.brand), std::move(params)));
+        net::structured_headers::Item(net::structured_headers::Item::string,
+                                      brand_version.brand),
+        std::move(params)));
   }
 
   return net::structured_headers::SerializeList(brand_version_header)
@@ -96,7 +99,8 @@ std::string UserAgentMetadata::SerializeFormFactors() const {
   net::structured_headers::List structured;
   for (const auto& form_factor : form_factors) {
     structured.emplace_back(net::structured_headers::ParameterizedMember(
-        net::structured_headers::Item(form_factor)));
+        net::structured_headers::Item(net::structured_headers::Item::string,
+                                      form_factor)));
   }
   return net::structured_headers::SerializeList(structured).value_or("");
 }
