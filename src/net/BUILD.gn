@@ -1590,6 +1590,8 @@ component("net") {
 
   if (chrome_root_store_supported) {
     sources += [
+      "cert/ev_root_ca_metadata_data.cc",
+      "cert/internal/trust_store_chrome_data.cc",
       "cert/internal/trust_store_chrome.cc",
       "cert/internal/trust_store_chrome.h",
     ]
