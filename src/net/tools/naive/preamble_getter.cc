@@ -39,11 +39,16 @@ namespace net {
 namespace {
 constexpr int kBufferSize = 64 * 1024;
 
-template <typename T>
-  requires(std::is_constructible_v<net::structured_headers::Item, T>)
-const std::string SerializeHeaderString(const T& value) {
+const std::string SerializeHeaderString(bool value) {
   return net::structured_headers::SerializeItem(
              net::structured_headers::Item(value))
+      .value_or(std::string());
+}
+
+const std::string SerializeHeaderString(const std::string& value) {
+  return net::structured_headers::SerializeItem(
+             net::structured_headers::Item(
+                 net::structured_headers::Item::string, value))
       .value_or(std::string());
 }
 }  // namespace
