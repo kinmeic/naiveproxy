@@ -82,7 +82,6 @@ NaiveConnection::NaiveConnection(
       early_pull_result_(ERR_IO_PENDING),
       full_duplex_(false),
       time_func_(&base::TimeTicks::Now),
-      created_at_(base::TimeTicks::Now()),
       traffic_annotation_(traffic_annotation) {
   io_callback_ = base::BindRepeating(&NaiveConnection::OnIOComplete,
                                      weak_ptr_factory_.GetWeakPtr());
@@ -508,7 +507,4 @@ base::TimeTicks NaiveConnection::GetLastWriteTime() const {
   }
 }
 
-base::TimeTicks NaiveConnection::GetCreationTime() const {
-  return created_at_;
-}
 }  // namespace net

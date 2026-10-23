@@ -54,8 +54,10 @@ class NaiveConnection {
   int Connect(CompletionOnceCallback callback);
   void Disconnect();
   int Run(CompletionOnceCallback callback);
+  const NetworkAnonymizationKey& network_anonymization_key() const {
+    return network_anonymization_key_;
+  }
   base::TimeTicks GetLastWriteTime() const;
-  base::TimeTicks GetCreationTime() const;
 
  private:
   enum State {
@@ -128,7 +130,6 @@ class NaiveConnection {
   TimeFunc time_func_;
 
   base::TimeTicks last_write_time_[kNumDirections];
-  base::TimeTicks created_at_;
 
   // Traffic annotation for socket control.
   const NetworkTrafficAnnotationTag& traffic_annotation_;
