@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 import argparse
+import base64
 import http.server
 import os
-import sys
+import select
 import shutil
+import socket
 import ssl
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -35,8 +38,28 @@ result.check_returncode()
 HTTPS_SERVER_HOSTNAME = '127.0.0.1'
 HTTP_SERVER_PORT = 60443 if server_protocol == 'https' else 60080
 
+class TestHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
+    def do_GET(self):
+        if self.path != '/long-lived':
+            return super().do_GET()
+
+        # Stay active beyond the one-minute connection cleanup interval.
+        chunks = [b'still-open\n'] * 14 + [b'long-lived-complete\n']
+        self.send_response(200)
+        self.send_header('Content-Length', str(sum(map(len, chunks))))
+        self.end_headers()
+        for i, chunk in enumerate(chunks):
+            if i:
+                time.sleep(5)
+            try:
+                self.wfile.write(chunk)
+                self.wfile.flush()
+            except OSError:
+                return
+
+
 httpd = http.server.HTTPServer(
-    (HTTPS_SERVER_HOSTNAME, HTTP_SERVER_PORT), http.server.SimpleHTTPRequestHandler)
+    (HTTPS_SERVER_HOSTNAME, HTTP_SERVER_PORT), TestHTTPRequestHandler)
 httpd.timeout = 1
 httpd.allow_reuse_address = True
 if server_protocol == 'https':
@@ -49,17 +72,18 @@ httpd_thread = threading.Thread(
 httpd_thread.start()
 
 
-def test_https_server(hostname, port, proxy=None):
-    url = f'{server_protocol}://{hostname}:{port}/404'
-    cmdline = ['curl', '-k', '-s']
+def test_https_server(hostname, port, proxy=None, path='/404',
+                      expected_output='Error code: 404', timeout=10):
+    url = f'{server_protocol}://{hostname}:{port}{path}'
+    cmdline = ['curl', '-k', '-s', '--max-time', str(timeout)]
     if proxy:
-        cmdline.extend(['--proxy', proxy])
+        cmdline.extend(['--proxy', proxy, '--noproxy', ''])
     cmdline.append(url)
     print('subprocess.run', ' '.join(cmdline))
     result = subprocess.run(cmdline, capture_output=True,
-                            timeout=10, text=True, encoding='utf-8')
+                            timeout=timeout + 5, text=True, encoding='utf-8')
     print(result.stderr, end='')
-    return 'Error code: 404' in result.stdout
+    return result.returncode == 0 and expected_output in result.stdout
 
 
 assert test_https_server(HTTPS_SERVER_HOSTNAME,
@@ -187,7 +211,11 @@ def test_naive_once(proxy, *args, **kwargs):
             return False
         naive_procs.append(naive_proc)
 
-    result = test_https_server(HTTPS_SERVER_HOSTNAME, HTTP_SERVER_PORT, proxy)
+    result = test_https_server(
+        HTTPS_SERVER_HOSTNAME, HTTP_SERVER_PORT, proxy,
+        path=kwargs.get('test_path', '/404'),
+        expected_output=kwargs.get('expected_output', 'Error code: 404'),
+        timeout=kwargs.get('test_timeout', 10))
 
     cleanup()
 
@@ -215,6 +243,105 @@ def test_naive(label, proxy, *args, **kwargs):
         print('** TEST PASS:', label, end='\n\n')
     else:
         print('** TEST FAIL:', label, end='\n\n')
+        sys.exit(1)
+
+
+class BasicAuthProxyHandler(http.server.BaseHTTPRequestHandler):
+    protocol_version = 'HTTP/1.1'
+
+    def do_CONNECT(self):
+        # Advance only on a match; a chain using the other chain's auth fails.
+        expected = self.server.expected_credentials[0]
+        encoded = base64.b64encode(expected.encode()).decode()
+        if self.headers.get('Proxy-Authorization') != f'Basic {encoded}':
+            self.connection.sendall(
+                b'HTTP/1.1 407 Proxy Authentication Required\r\n'
+                b'Proxy-Authenticate: Basic realm="test"\r\n'
+                b'Content-Length: 0\r\n'
+                b'Connection: close\r\n\r\n')
+            self.close_connection = True
+            return
+
+        host, port = self.path.rsplit(':', 1)
+        try:
+            upstream = socket.create_connection((host.strip('[]'), int(port)),
+                                                timeout=10)
+        except OSError:
+            self.connection.sendall(
+                b'HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n'
+                b'Connection: close\r\n\r\n')
+            self.close_connection = True
+            return
+
+        self.server.expected_credentials.pop(0)
+        self.connection.sendall(
+            b'HTTP/1.1 200 Connection Established\r\n\r\n')
+        sockets = (self.connection, upstream)
+        try:
+            while True:
+                readable, _, exceptional = select.select(
+                    sockets, [], sockets, 30)
+                if exceptional or not readable:
+                    return
+                for source in readable:
+                    data = source.recv(65536)
+                    if not data:
+                        return
+                    destination = (upstream if source is self.connection
+                                   else self.connection)
+                    destination.sendall(data)
+        except OSError:
+            return
+        finally:
+            upstream.close()
+
+    def log_message(self, format, *args):
+        pass
+
+
+def test_naive_auth_isolation():
+    listen_a = allocate_port_number()
+    listen_b = allocate_port_number()
+    credentials = ['tenant-a:pass-a', 'tenant-b:pass-b']
+
+    auth_server = http.server.ThreadingHTTPServer(
+        ('127.0.0.1', 0), BasicAuthProxyHandler)
+    auth_port = auth_server.server_address[1]
+    auth_server.expected_credentials = credentials.copy()
+    auth_thread = threading.Thread(
+        target=auth_server.serve_forever, daemon=True)
+    auth_thread.start()
+
+    naive_args = [
+        '--log',
+        f'--listen=socks://127.0.0.1:{listen_a}',
+        f'--listen=socks://127.0.0.1:{listen_b}',
+        f'--proxy=http://tenant-a:pass-a@127.0.0.1:{auth_port}',
+        f'--proxy=http://tenant-b:pass-b@127.0.0.1:{auth_port}',
+    ]
+    proc = None
+    try:
+        proc = start_naive(naive_args, None)
+        if not isinstance(proc, subprocess.Popen):
+            raise RuntimeError('Failed to start NaiveProxy for auth test')
+        result_a = test_https_server(
+            HTTPS_SERVER_HOSTNAME, HTTP_SERVER_PORT,
+            f'socks5h://127.0.0.1:{listen_a}')
+        result_b = test_https_server(
+            HTTPS_SERVER_HOSTNAME, HTTP_SERVER_PORT,
+            f'socks5h://127.0.0.1:{listen_b}')
+    finally:
+        if isinstance(proc, subprocess.Popen) and proc.poll() is None:
+            proc.terminate()
+            proc.wait(timeout=10)
+        auth_server.shutdown()
+        auth_server.server_close()
+        auth_thread.join(timeout=10)
+
+    if result_a and result_b and not auth_server.expected_credentials:
+        print('** TEST PASS: Multiple proxy chains isolate auth', end='\n\n')
+    else:
+        print('** TEST FAIL: Multiple proxy chains isolate auth', end='\n\n')
         sys.exit(1)
 
 
@@ -330,3 +457,15 @@ test_naive('HTTPa-HTTPb,HTTPc (chaining with multiple auth)', 'http://127.0.0.1:
            '--log --listen=http://hello:world2@127.0.0.1:{PORT2}',
            '--log --listen=http://hello:world3@127.0.0.1:{PORT3}',
            '--log --listen=http://127.0.0.1:{PORT1} --proxy=http://hello:world2@127.0.0.1:{PORT2},http://hello:world3@127.0.0.1:{PORT3}')
+
+test_naive_auth_isolation()
+
+if server_protocol == 'https':
+    test_naive(
+        'Long-lived connection survives tunnel cleanup',
+        'socks5h://127.0.0.1:{PORT1}',
+        '--log --listen=socks://127.0.0.1:{PORT1} '
+        '--idle-timeout=30 --tunnel-timeout=1',
+        test_path='/long-lived',
+        expected_output='long-lived-complete',
+        test_timeout=100)

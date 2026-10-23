@@ -275,20 +275,23 @@ std::unique_ptr<URLRequestContext> BuildURLRequestContext(
 
   auto context = builder.Build();
 
-  if (!config.origins_to_force_quic_on.empty()) {
-    auto* quic = context->quic_context()->params();
-    quic->supported_versions = {quic::ParsedQuicVersion::RFCv1()};
-    quic->origins_to_force_quic_on.insert(
-        config.origins_to_force_quic_on.begin(),
-        config.origins_to_force_quic_on.end());
-  }
+  if (proxy_chain_index < static_cast<int>(config.proxy_configs.size())) {
+    const auto& proxy_config = config.proxy_configs[proxy_chain_index];
+    if (!proxy_config.origins_to_force_quic_on.empty()) {
+      auto* quic = context->quic_context()->params();
+      quic->supported_versions = {quic::ParsedQuicVersion::RFCv1()};
+      quic->origins_to_force_quic_on.insert(
+          proxy_config.origins_to_force_quic_on.begin(),
+          proxy_config.origins_to_force_quic_on.end());
+    }
 
-  for (const auto& [k, v] : config.auth_store) {
-    auto* session = context->http_transaction_factory()->GetSession();
-    auto* auth_cache = session->http_auth_cache();
-    auth_cache->Add(k, HttpAuth::AUTH_PROXY,
-                    /*realm=*/{}, HttpAuth::AUTH_SCHEME_BASIC, {},
-                    /*challenge=*/"Basic", v, /*path=*/"/");
+    for (const auto& [k, v] : proxy_config.auth_store) {
+      auto* session = context->http_transaction_factory()->GetSession();
+      auto* auth_cache = session->http_auth_cache();
+      auth_cache->Add(k, HttpAuth::AUTH_PROXY,
+                      /*realm=*/{}, HttpAuth::AUTH_SCHEME_BASIC, {},
+                      /*challenge=*/"Basic", v, /*path=*/"/");
+    }
   }
 
   return context;
