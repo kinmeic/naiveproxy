@@ -4,6 +4,17 @@ on:
     branches: [master]
     paths-ignore: [README.md]
   workflow_dispatch:
+    inputs:
+      android_only:
+        description: Build only the Android arm64 target
+        type: boolean
+        required: false
+        default: false
+      apk_version_name:
+        description: Version name for the Android APK
+        type: string
+        required: false
+        default: v0.0.0-1
   release:
     types: [published]
 defaults:
@@ -50,6 +61,7 @@ jobs:
             wget https://snapshot.debian.org/archive/debian/20250405T083429Z/pool/main/q/qemu/qemu-user_9.2.2%2Bds-1%2Bb2_amd64.deb
           fi
   cache-toolchains-win:
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.android_only }}
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
@@ -74,6 +86,7 @@ jobs:
             unzip ninja-win.zip -d ~/bin
           fi
   cache-toolchains-mac-x64:
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.android_only }}
     runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v4
@@ -86,6 +99,7 @@ jobs:
           key: toolchains-pgo-mac-x64-${{ hashFiles('CHROMIUM_VERSION') }}-v${{ env.CACHE_EPOCH }}
       - run: EXTRA_FLAGS='target_cpu="x64"' ./get-clang.sh
   cache-toolchains-mac-arm64:
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.android_only }}
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -99,7 +113,7 @@ jobs:
       - run: EXTRA_FLAGS='target_cpu="arm64"' ./get-clang.sh
   linux:
     needs: cache-toolchains-posix
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || !inputs.android_only) }}
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
@@ -190,7 +204,7 @@ jobs:
             abi: arm64-v8a
     env:
       EXTRA_FLAGS: 'target_cpu="${{ matrix.arch }}" target_os="android"'
-      BUNDLE: naiveproxy-plugin-${{ github.event.release.tag_name || github.ref_name }}-${{ matrix.abi }}.apk
+      BUNDLE: naiveproxy-plugin-${{ github.event.release.tag_name || inputs.apk_version_name || github.ref_name }}-${{ matrix.abi }}.apk
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -257,7 +271,7 @@ jobs:
         working-directory: apk
         env:
           APK_ABI: ${{ matrix.abi }}
-          APK_VERSION_NAME: ${{ github.event.release.tag_name || 'v0.0.0-1' }}
+          APK_VERSION_NAME: ${{ github.event.release.tag_name || inputs.apk_version_name || 'v0.0.0-1' }}
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -306,7 +320,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   win:
     needs: cache-toolchains-win
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || !inputs.android_only) }}
     runs-on: windows-2022
     strategy:
       fail-fast: false
@@ -363,7 +377,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   mac-x64:
     needs: cache-toolchains-mac-x64
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || !inputs.android_only) }}
     runs-on: macos-15-intel
     strategy:
       fail-fast: false
@@ -415,7 +429,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   mac-arm64:
     needs: cache-toolchains-mac-arm64
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || !inputs.android_only) }}
     runs-on: macos-15
     strategy:
       fail-fast: false
@@ -467,7 +481,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   openwrt:
     needs: cache-toolchains-posix
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || !inputs.android_only) }}
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
