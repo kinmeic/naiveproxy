@@ -19,7 +19,15 @@ namespace version_info {
 
 #if BUILDFLAG(IS_ANDROID)
 std::string_view GetVersionNumber() {
-  return base::android::apk_info::package_version_name();
+  const std::string_view package_version =
+      base::android::apk_info::package_version_name();
+  if (base::Version(package_version).IsValid()) {
+    return package_version;
+  }
+
+  // Standalone Android binaries may not have APK metadata available, and an
+  // embedding app's version name may not be a numeric Chromium version.
+  return PRODUCT_VERSION;
 }
 #endif
 
