@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <iostream>
+#include <utility>
 
 #include "base/strings/escape.h"
 #include "base/strings/string_number_conversions.h"
@@ -183,6 +184,7 @@ bool NaiveConfig::Parse(const base::DictValue& value) {
       return false;
     }
     for (const std::string& str : proxy_strs) {
+      PerProxyConfig proxy_config;
       base::StringTokenizer proxy_uri_list(str, ",");
       std::vector<ProxyServer> proxy_servers;
       bool seen_tcp = false;
@@ -210,7 +212,8 @@ bool NaiveConfig::Parse(const base::DictValue& value) {
                       << std::endl;
             return false;
           }
-          origins_to_force_quic_on.insert(url::SchemeHostPort(url));
+          proxy_config.origins_to_force_quic_on.insert(
+              url::SchemeHostPort(url));
         } else if (last.is_https() || last.is_http() || last.is_socks()) {
           seen_tcp = true;
         } else {
@@ -227,7 +230,8 @@ bool NaiveConfig::Parse(const base::DictValue& value) {
             if (proxy_url.compare(0, 7, "quic://") == 0) {
               proxy_url.replace(0, 4, "https");
             }
-            auth_store[url::SchemeHostPort{GURL{proxy_url}}] = auth;
+            proxy_config.auth_store[url::SchemeHostPort{GURL{proxy_url}}] =
+                auth;
           }
         }
       }
@@ -256,6 +260,7 @@ bool NaiveConfig::Parse(const base::DictValue& value) {
         return false;
       }
       proxy_chains.push_back(proxy_chain);
+      proxy_configs.push_back(std::move(proxy_config));
     }
   }
 
