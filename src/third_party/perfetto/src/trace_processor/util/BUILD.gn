@@ -569,7 +569,6 @@ source_set("unittests") {
     ":tar_writer",
     ":trace_blob_view_reader",
     ":zip_reader",
-    "..:gen_cc_test_messages_descriptor",
     "../../../gn:default_deps",
     "../../../gn:gtest_and_gmock",
     "../../../protos/perfetto/common:zero",
@@ -587,6 +586,9 @@ source_set("unittests") {
     "../storage",
     "../types",
   ]
+  if (enable_perfetto_trace_processor) {
+    deps += [ "..:gen_cc_test_messages_descriptor" ]
+  }
   if (perfetto_build_standalone) {
     deps += [
       "../../../protos/perfetto/metrics/chrome:zero",
@@ -614,7 +616,6 @@ if (enable_perfetto_benchmarks) {
       ":descriptors",
       ":glob",
       ":proto_to_args_parser",
-      "..:gen_cc_test_messages_descriptor",
       "../../../gn:benchmark",
       "../../../gn:default_deps",
       "../../../gn:sqlite",
@@ -623,6 +624,9 @@ if (enable_perfetto_benchmarks) {
       "../../protozero:testing_messages_zero",
       "../containers",
     ]
+    if (enable_perfetto_trace_processor) {
+      deps += [ "..:gen_cc_test_messages_descriptor" ]
+    }
     sources = [
       "glob_benchmark.cc",
       "proto_to_args_parser_benchmark.cc",

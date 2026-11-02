@@ -37,6 +37,8 @@ perfetto_unittest_source_set("unittests") {
     "../../../gn:default_deps",
     "../../../gn:gtest_and_gmock",
     "../../base",
-    "../../trace_processor:gen_cc_test_messages_descriptor",
   ]
+  if (enable_perfetto_trace_processor) {
+    deps += [ "../../trace_processor:gen_cc_test_messages_descriptor" ]
+  }
 }
