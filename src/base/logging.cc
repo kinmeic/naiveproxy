@@ -35,6 +35,9 @@
 #include "base/functional/callback.h"
 #include "base/immediate_crash.h"
 #include "base/logging/logging_settings.h"
+#if defined(BASE_HAS_RUST_LOGGER)
+#include "base/logging/rust_logger/lib.rs.h"
+#endif
 #include "base/no_destructor.h"
 #include "base/path_service.h"
 #include "base/pending_task.h"
@@ -544,7 +547,9 @@ bool BaseInitLoggingImpl(const LoggingSettings& settings) {
 
 void SetMinLogLevel(int level) {
   g_min_log_level = std::min(LOGGING_FATAL, level);
+#if defined(BASE_HAS_RUST_LOGGER)
   internal::update_rust_log_level(g_min_log_level);
+#endif
 }
 
 int GetMinLogLevel() {
