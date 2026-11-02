@@ -518,94 +518,96 @@ source_set("flatbuffer_reader") {
   ]
 }
 
-source_set("unittests") {
-  sources = [
-    "bump_allocator_unittest.cc",
-    "cold_sort_unittest.cc",
-    "concurrency_stress_test_util_unittest.cc",
-    "descriptors_unittest.cc",
-    "flatbuffer_reader_unittest.cc",
-    "glob_unittest.cc",
-    "graph_unittest.cc",
-    "json_parser_unittest.cc",
-    "json_serializer_unittest.cc",
-    "json_value_unittest.cc",
-    "proto_profiler_unittest.cc",
-    "proto_to_args_parser_unittest.cc",
-    "protozero_to_json_unittests.cc",
-    "protozero_to_text_unittests.cc",
-    "simple_json_parser_unittest.cc",
-    "simple_json_serializer_unittest.cc",
-    "sorted_search_unittest.cc",
-    "sql_argument_unittest.cc",
-    "streaming_line_reader_unittest.cc",
-    "tar_writer_unittest.cc",
-    "trace_blob_view_reader_unittest.cc",
-    "zip_reader_unittest.cc",
-  ]
-
-  testonly = true
-  deps = [
-    ":bump_allocator",
-    ":cold_sort",
-    ":concurrency_stress_test_util",
-    ":decompressor",
-    ":descriptors",
-    ":flatbuffer_reader",
-    ":flatbuffer_writer",
-    ":glob",
-    ":graph",
-    ":json_parser",
-    ":json_serializer",
-    ":json_value",
-    ":proto_profiler",
-    ":proto_to_args_parser",
-    ":protozero_to_json",
-    ":protozero_to_text",
-    ":simple_json_parser",
-    ":simple_json_serializer",
-    ":sorted_search",
-    ":sql_argument",
-    ":tar_writer",
-    ":trace_blob_view_reader",
-    ":zip_reader",
-    "../../../gn:default_deps",
-    "../../../gn:gtest_and_gmock",
-    "../../../protos/perfetto/common:zero",
-    "../../../protos/perfetto/trace:non_minimal_zero",
-    "../../../protos/perfetto/trace/interned_data:zero",
-    "../../../protos/perfetto/trace/profiling:zero",
-    "../../../protos/perfetto/trace/track_event:zero",
-    "../../base:test_support",
-    "../../protozero",
-    "../../protozero:testing_messages_zero",
-    "../importers/common",
-    "../importers/proto:gen_cc_track_event_descriptor",
-    "../importers/proto:minimal",
-    "../importers/proto:packet_sequence_state_generation_hdr",
-    "../storage",
-    "../types",
-  ]
-  if (enable_perfetto_trace_processor) {
-    deps += [ "..:gen_cc_test_messages_descriptor" ]
-  }
-  if (perfetto_build_standalone) {
-    deps += [
-      "../../../protos/perfetto/metrics/chrome:zero",
-      "../metrics:gen_cc_all_chrome_metrics_descriptor",
+if (enable_perfetto_unittests && enable_perfetto_trace_processor) {
+  source_set("unittests") {
+    sources = [
+      "bump_allocator_unittest.cc",
+      "cold_sort_unittest.cc",
+      "concurrency_stress_test_util_unittest.cc",
+      "descriptors_unittest.cc",
+      "flatbuffer_reader_unittest.cc",
+      "glob_unittest.cc",
+      "graph_unittest.cc",
+      "json_parser_unittest.cc",
+      "json_serializer_unittest.cc",
+      "json_value_unittest.cc",
+      "proto_profiler_unittest.cc",
+      "proto_to_args_parser_unittest.cc",
+      "protozero_to_json_unittests.cc",
+      "protozero_to_text_unittests.cc",
+      "simple_json_parser_unittest.cc",
+      "simple_json_serializer_unittest.cc",
+      "sorted_search_unittest.cc",
+      "sql_argument_unittest.cc",
+      "streaming_line_reader_unittest.cc",
+      "tar_writer_unittest.cc",
+      "trace_blob_view_reader_unittest.cc",
+      "zip_reader_unittest.cc",
     ]
-  }
-  if (enable_perfetto_zlib) {
-    sources += [ "gzip_decompressor_unittest.cc" ]
-    deps += [ "../../../gn:zlib" ]
-  }
-  if (enable_perfetto_zstd) {
-    sources += [ "zstd_decompressor_unittest.cc" ]
-    deps += [ "../../../gn:zstd" ]
-  }
-  if (enable_perfetto_trace_processor_sqlite) {
-    sources += [ "sql_module_doc_parser_unittest.cc" ]
-    deps += [ ":sql_module_doc_parser" ]
+
+    testonly = true
+    deps = [
+      ":bump_allocator",
+      ":cold_sort",
+      ":concurrency_stress_test_util",
+      ":decompressor",
+      ":descriptors",
+      ":flatbuffer_reader",
+      ":flatbuffer_writer",
+      ":glob",
+      ":graph",
+      ":json_parser",
+      ":json_serializer",
+      ":json_value",
+      ":proto_profiler",
+      ":proto_to_args_parser",
+      ":protozero_to_json",
+      ":protozero_to_text",
+      ":simple_json_parser",
+      ":simple_json_serializer",
+      ":sorted_search",
+      ":sql_argument",
+      ":tar_writer",
+      ":trace_blob_view_reader",
+      ":zip_reader",
+      "../../../gn:default_deps",
+      "../../../gn:gtest_and_gmock",
+      "../../../protos/perfetto/common:zero",
+      "../../../protos/perfetto/trace:non_minimal_zero",
+      "../../../protos/perfetto/trace/interned_data:zero",
+      "../../../protos/perfetto/trace/profiling:zero",
+      "../../../protos/perfetto/trace/track_event:zero",
+      "../../base:test_support",
+      "../../protozero",
+      "../../protozero:testing_messages_zero",
+      "../importers/common",
+      "../importers/proto:gen_cc_track_event_descriptor",
+      "../importers/proto:minimal",
+      "../importers/proto:packet_sequence_state_generation_hdr",
+      "../storage",
+      "../types",
+    ]
+    if (enable_perfetto_trace_processor) {
+      deps += [ "..:gen_cc_test_messages_descriptor" ]
+    }
+    if (perfetto_build_standalone) {
+      deps += [
+        "../../../protos/perfetto/metrics/chrome:zero",
+        "../metrics:gen_cc_all_chrome_metrics_descriptor",
+      ]
+    }
+    if (enable_perfetto_zlib) {
+      sources += [ "gzip_decompressor_unittest.cc" ]
+      deps += [ "../../../gn:zlib" ]
+    }
+    if (enable_perfetto_zstd) {
+      sources += [ "zstd_decompressor_unittest.cc" ]
+      deps += [ "../../../gn:zstd" ]
+    }
+    if (enable_perfetto_trace_processor_sqlite) {
+      sources += [ "sql_module_doc_parser_unittest.cc" ]
+      deps += [ ":sql_module_doc_parser" ]
+    }
   }
 }
 
