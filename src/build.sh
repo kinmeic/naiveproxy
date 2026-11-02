@@ -58,6 +58,7 @@ flags="$flags"'
   enable_perfetto_unittests=false
 
   use_udev=false
+  use_dbus=false
   use_aura=false
   use_ozone=false
   use_gio=false
