@@ -54,6 +54,8 @@ flags="$flags"'
   treat_warnings_as_errors=false
 
   is_cronet_build=true
+  enable_perfetto_trace_processor=false
+  enable_perfetto_unittests=false
 
   use_udev=false
   use_aura=false
