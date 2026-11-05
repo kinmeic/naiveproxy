@@ -122,7 +122,8 @@ Options:
 
   --log-net-log=<path>
 
-    Saves NetLog. View at https://netlog-viewer.appspot.com/.
+    Saves NetLog as NDJSON (one complete JSON record per line).
+    View at https://netlog-viewer.appspot.com/.
 
   --ssl-key-log-file=<path>
 
