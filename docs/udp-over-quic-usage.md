@@ -18,6 +18,9 @@ proxy's QUIC connection and retain their independent Naive padding negotiation.
 UDP carries an unmodified payload with Context ID zero; it does not use the
 TCP padding framer or HTTP DATA as a reliable fallback.
 
+This does not establish browser-equivalent traffic or lower firewall detection
+risk than ordinary HTTPS. See the [audit and traffic-risk assessment](udp-over-quic-audit.zh-CN.md).
+
 The application must support SOCKS5 UDP ASSOCIATE, use the returned relay
 endpoint and keep the TCP control connection open. IPv4, IPv6, domain targets and
 empty UDP payloads are supported. Only one client UDP source endpoint is accepted

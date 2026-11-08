@@ -217,10 +217,10 @@ void NaiveUdpAssociation::OnUdpReadComplete(int result) {
     std::string_view packet_data(udp_read_buf_->data(), result);
     std::optional<Socks5UdpPacket> packet = ParseSocks5UdpPacket(packet_data);
     if (packet.has_value()) {
+      if (!client_udp_endpoint_.has_value()) {
+        client_udp_endpoint_ = udp_read_address_;
+      }
       if (OnUdpPacket(packet->destination, std::move(packet->payload))) {
-        if (!client_udp_endpoint_.has_value()) {
-          client_udp_endpoint_ = udp_read_address_;
-        }
         ResetIdleTimer();
       }
     } else {

@@ -109,6 +109,7 @@ class NET_EXPORT_PRIVATE QuicProxyClientSocket
     STATE_GENERATE_AUTH_TOKEN_COMPLETE,
     STATE_CALCULATE_HEADERS,
     STATE_CALCULATE_HEADERS_COMPLETE,
+    STATE_WAIT_UDP_SETTINGS,
     STATE_SEND_REQUEST,
     STATE_SEND_REQUEST_COMPLETE,
     STATE_READ_REPLY,
@@ -136,6 +137,7 @@ class NET_EXPORT_PRIVATE QuicProxyClientSocket
   int DoGenerateAuthTokenComplete(int result);
   int DoCalculateHeaders();
   int DoCalculateHeadersComplete(int result);
+  int DoWaitUdpSettings();
   int DoSendRequest();
   int DoSendRequestComplete(int result);
   int DoReadReply();

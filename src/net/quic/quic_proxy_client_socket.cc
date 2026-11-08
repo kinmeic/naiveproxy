@@ -344,6 +344,9 @@ int QuicProxyClientSocket::DoLoop(int last_io_result) {
       case STATE_CALCULATE_HEADERS_COMPLETE:
         rv = DoCalculateHeadersComplete(rv);
         break;
+      case STATE_WAIT_UDP_SETTINGS:
+        rv = DoWaitUdpSettings();
+        break;
       case STATE_SEND_REQUEST:
         DCHECK_EQ(OK, rv);
         net_log_.BeginEvent(
@@ -451,7 +454,7 @@ int QuicProxyClientSocket::DoCalculateHeadersComplete(int result) {
   if (result != OK) {
     return result;
   }
-  next_state_ = STATE_SEND_REQUEST;
+  next_state_ = is_udp_tunnel_ ? STATE_WAIT_UDP_SETTINGS : STATE_SEND_REQUEST;
   if (proxy_delegate_headers_.HasHeader("fastopen")) {
     proxy_delegate_headers_.RemoveHeader("fastopen");
     // TODO(klzgrad): look into why Fast Open does not work.
@@ -496,24 +499,27 @@ int QuicProxyClientSocket::DoCalculateHeadersComplete(int result) {
   return result;
 }
 
-int QuicProxyClientSocket::DoSendRequest() {
-  if (is_udp_tunnel_) {
-    int support = stream_->CheckConnectUdpSupport();
-    if (support == ERR_IO_PENDING) {
-      // SETTINGS travel on a separate stream and can arrive after the QUIC
-      // handshake. The enclosing ConnectJob bounds the complete setup time.
-      next_state_ = STATE_SEND_REQUEST;
-      base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
-          FROM_HERE,
-          base::BindOnce(&QuicProxyClientSocket::OnIOComplete,
-                         weak_factory_.GetWeakPtr(), OK),
-          base::Milliseconds(10));
-      return ERR_IO_PENDING;
-    }
-    if (support != OK) {
-      return support;
-    }
+int QuicProxyClientSocket::DoWaitUdpSettings() {
+  int support = stream_->CheckConnectUdpSupport();
+  if (support == ERR_IO_PENDING) {
+    // Wait without opening another SEND_REQUEST NetLog event on every poll.
+    // The enclosing ConnectJob bounds setup time. A modest poll interval also
+    // bounds work if many streams are waiting on one delayed control stream.
+    next_state_ = STATE_WAIT_UDP_SETTINGS;
+    base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
+        FROM_HERE,
+        base::BindOnce(&QuicProxyClientSocket::OnIOComplete,
+                       weak_factory_.GetWeakPtr(), OK),
+        base::Milliseconds(50));
+    return ERR_IO_PENDING;
   }
+  if (support == OK) {
+    next_state_ = STATE_SEND_REQUEST;
+  }
+  return support;
+}
+
+int QuicProxyClientSocket::DoSendRequest() {
   next_state_ = STATE_SEND_REQUEST_COMPLETE;
 
   std::string request_line;
