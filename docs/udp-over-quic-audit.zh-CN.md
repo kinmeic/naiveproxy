@@ -39,9 +39,13 @@
   以及共享连接上的 TCP padding 共存。
 - 原 TCP HTTP 代理回归 28 通过、4 跳过（默认端口用例未运行）。
 - 本机 macOS 缺少旧测试要求的 127.x loopback aliases，因此本地 Go race
-  运行 UDP 子集。Naive 仓库的 GitHub Actions 在此前运行时被平台以
-  “Actions has been disabled for this repository” 拒绝，不能把本地 macOS
-  编译当作已完成 Linux/Android 全平台验证。
+  运行 UDP 子集。本轮服务端 [Linux 完整测试和 macOS UDP 测试](https://github.com/kinmeic/forwardproxy/actions/runs/42464763043)
+  均已通过，[构建打包](https://github.com/kinmeic/forwardproxy/actions/runs/42464763057)
+  成功；对应代码修复提交 `8b2ddbf`。不能把本地 macOS 编译当作已完成
+  Linux/Android 全平台验证。
+- 客户端 [Linux 双端 CI](https://github.com/kinmeic/naiveproxy/actions/runs/42464763577)
+  在本次文档收尾时仍处于完整客户端编译阶段，尚未计为通过；对应源码提交
+  `1c60e7c452`。Android 本轮未构建验证。
 
 ## 与 HTTPS 对比的结论
 
@@ -49,11 +53,12 @@
 
 | 基准 | 结论 | 理由 |
 | --- | --- | --- |
-| 普通 HTTPS over TCP（HTTP/1.1、HTTP/2） | 工程上应按更高的传输分类/阻断风险看待；没有证据表明精确识别为代理的概率更低 | 外层改成 UDP/QUIC，可被独立限速/阻断；本实现没有 UDP 的 TCP 可靠回退，另外还保留包长/时序线索 |
+| 普通 HTTPS over TCP（HTTP/1.1、HTTP/2） | 不能认定风险更低；在限制 UDP/QUIC 的网络里，阻断/不可用风险更高，部署时保守按此评估 | 外层改成 UDP/QUIC，可被独立限速/阻断；本实现没有 UDP 的 TCP 可靠回退，另外还保留包长/时序线索 |
 | 普通 HTTPS over QUIC（HTTP/3） | 没有依据判断更低；代理特有的流量形态可能增加统计分类线索，程度尚未量化 | 外层都是 QUIC/H3，不能仅凭 UDP/443 或 DATAGRAM 能力断定是代理；需比较真实浏览器/站点的握手与业务分布 |
 | Naive 原 TCP 代理路径 | UDP 路径没有沿用 TCP 的 padding 保护 | 原 TCP padding framer 不能直接用于无状态数据报；当前 UDP 保持 RFC Context 0 原始载荷 |
 
-此处“更高”是可观察面和阻断策略上的工程判断，不是测得的分类准确率。
+此处“更高”是可观察面和特定阻断策略上的工程判断，不是测得的分类准确率。
+实际通行率取决于目标网络策略；不能把这个判断泛化为任意防火墙上都更高。
 普通 HTTPS 本身也可按 IP、SNI 或策略阻断；不能推导为 TCP HTTPS 不可识别。
 
 ### 没有发现可被旁路直接读取的 CONNECT-UDP 明文标记
