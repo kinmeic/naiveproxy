@@ -1,7 +1,7 @@
 name: Build
 on:
   push:
-    branches: [master, main]
+    branches: [master, main, codex/udp-over-quic]
     paths-ignore: [README.md]
   workflow_dispatch:
     inputs:
@@ -28,6 +28,7 @@ env:
   SCCACHE_CACHE_SIZE: 200M
 jobs:
   cache-toolchains-posix:
+    if: ${{ github.ref_name != 'codex/udp-over-quic' }}
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -61,7 +62,7 @@ jobs:
             wget https://snapshot.debian.org/archive/debian/20250405T083429Z/pool/main/q/qemu/qemu-user_9.2.2%2Bds-1%2Bb2_amd64.deb
           fi
   cache-toolchains-win:
-    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.android_only }}
+    if: ${{ github.ref_name != 'codex/udp-over-quic' && (github.event_name != 'workflow_dispatch' || !inputs.android_only) }}
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
@@ -86,7 +87,7 @@ jobs:
             unzip ninja-win.zip -d ~/bin
           fi
   cache-toolchains-mac-x64:
-    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.android_only }}
+    if: ${{ github.ref_name != 'codex/udp-over-quic' && (github.event_name != 'workflow_dispatch' || !inputs.android_only) }}
     runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v4
@@ -99,7 +100,7 @@ jobs:
           key: toolchains-pgo-mac-x64-${{ hashFiles('CHROMIUM_VERSION') }}-v${{ env.CACHE_EPOCH }}
       - run: EXTRA_FLAGS='target_cpu="x64"' ./get-clang.sh
   cache-toolchains-mac-arm64:
-    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.android_only }}
+    if: ${{ github.ref_name != 'codex/udp-over-quic' && (github.event_name != 'workflow_dispatch' || !inputs.android_only) }}
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -113,7 +114,7 @@ jobs:
       - run: EXTRA_FLAGS='target_cpu="arm64"' ./get-clang.sh
   linux:
     needs: cache-toolchains-posix
-    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || !inputs.android_only) }}
+    if: ${{ github.ref_name != 'codex/udp-over-quic' && (!cancelled() && (github.event_name != 'workflow_dispatch' || !inputs.android_only)) }}
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
@@ -194,7 +195,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   android:
     needs: cache-toolchains-posix
-    if: ${{ !cancelled() }}
+    if: ${{ github.ref_name != 'codex/udp-over-quic' && (!cancelled()) }}
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
@@ -320,7 +321,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   win:
     needs: cache-toolchains-win
-    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || !inputs.android_only) }}
+    if: ${{ github.ref_name != 'codex/udp-over-quic' && (!cancelled() && (github.event_name != 'workflow_dispatch' || !inputs.android_only)) }}
     runs-on: windows-2022
     strategy:
       fail-fast: false
@@ -377,7 +378,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   mac-x64:
     needs: cache-toolchains-mac-x64
-    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || !inputs.android_only) }}
+    if: ${{ github.ref_name != 'codex/udp-over-quic' && (!cancelled() && (github.event_name != 'workflow_dispatch' || !inputs.android_only)) }}
     runs-on: macos-15-intel
     strategy:
       fail-fast: false
@@ -429,7 +430,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   mac-arm64:
     needs: cache-toolchains-mac-arm64
-    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || !inputs.android_only) }}
+    if: ${{ github.ref_name != 'codex/udp-over-quic' && (!cancelled() && (github.event_name != 'workflow_dispatch' || !inputs.android_only)) }}
     runs-on: macos-15
     strategy:
       fail-fast: false
@@ -481,7 +482,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   openwrt:
     needs: cache-toolchains-posix
-    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || !inputs.android_only) }}
+    if: ${{ github.ref_name != 'codex/udp-over-quic' && (!cancelled() && (github.event_name != 'workflow_dispatch' || !inputs.android_only)) }}
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
@@ -571,3 +572,9 @@ jobs:
         run: gh release upload "${GITHUB_REF##*/}" ${{ env.BUNDLE }}.tar.xz packages/*.ipk packages/*.apk --clobber
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  udp-over-quic:
+    if: ${{ github.ref_name == 'codex/udp-over-quic' }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/udp.yml
