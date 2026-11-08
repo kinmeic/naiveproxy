@@ -371,7 +371,7 @@ int HttpProxyClientSocket::DoCalculateHeaders() {
     ASSIGN_OR_RETURN(
         proxy_delegate_headers_,
         proxy_delegate_->OnBeforeTunnelRequest(
-            proxy_chain_, proxy_chain_index_,
+            proxy_chain_, proxy_chain_index_, ProxyTunnelType::kConnect,
             base::BindOnce(
                 &HttpProxyClientSocket::OnBeforeTunnelRequestComplete,
                 weak_factory_.GetWeakPtr())),
@@ -477,7 +477,8 @@ int HttpProxyClientSocket::DoProcessResponseHeaders() {
 
   if (proxy_delegate_) {
     return proxy_delegate_->OnTunnelHeadersReceived(
-        proxy_chain_, proxy_chain_index_, *response_.headers,
+        proxy_chain_, proxy_chain_index_, ProxyTunnelType::kConnect,
+        *response_.headers,
         base::BindOnce(&HttpProxyClientSocket::OnIOComplete,
                        weak_factory_.GetWeakPtr()));
   }

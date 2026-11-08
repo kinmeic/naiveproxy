@@ -277,6 +277,9 @@ int QuicChromiumClientStream::Handle::WriteStreamData(
   ScopedBoolSaver saver(&may_invoke_callbacks_, false);
   if (!stream_)
     return net_error_;
+  if (stream_->write_side_closed()) {
+    return ERR_CONNECTION_CLOSED;
+  }
 
   if (stream_->WriteStreamData(data, fin)) {
     return HandleIOComplete(OK);
@@ -294,12 +297,28 @@ int QuicChromiumClientStream::Handle::WritevStreamData(
   ScopedBoolSaver saver(&may_invoke_callbacks_, false);
   if (!stream_)
     return net_error_;
+  if (stream_->write_side_closed()) {
+    return ERR_CONNECTION_CLOSED;
+  }
 
   if (stream_->WritevStreamData(buffers, lengths, fin))
     return HandleIOComplete(OK);
 
   SetCallback(std::move(callback), &write_callback_);
   return ERR_IO_PENDING;
+}
+
+int QuicChromiumClientStream::Handle::CheckConnectUdpSupport() const {
+  if (!stream_) {
+    return ERR_CONNECTION_CLOSED;
+  }
+  if (!stream_->session_->settings_received()) {
+    return ERR_IO_PENDING;
+  }
+  return stream_->session_->allow_extended_connect() &&
+                 stream_->SupportsH3Datagram()
+             ? OK
+             : ERR_NOT_IMPLEMENTED;
 }
 
 int QuicChromiumClientStream::Handle::WriteConnectUdpPayload(
@@ -316,7 +335,7 @@ int QuicChromiumClientStream::Handle::WriteConnectUdpPayload(
         << "Dropping datagram because the session has either not received "
            "settings frame with H3_DATAGRAM yet or received settings that "
            "indicate datagrams are not supported (i.e., H3_DATAGRAM=0).";
-    return OK;
+    return ERR_NOT_IMPLEMENTED;
   }
   // Set Context ID to zero as per RFC 9298
   // (https://datatracker.ietf.org/doc/html/rfc9298#name-http-datagram-payload-forma)
@@ -327,6 +346,9 @@ int QuicChromiumClientStream::Handle::WriteConnectUdpPayload(
   quic::DatagramStatus message_status =
       stream_->SendHttp3Datagram(http_payload);
 
+  if (message_status == quic::DatagramStatus::DATAGRAM_STATUS_TOO_LARGE) {
+    return ERR_MSG_TOO_BIG;
+  }
   // If the attempt was successful or blocked (e.g., due to buffer
   // constraints), proceed to handle the I/O completion with an OK status.
   if (message_status == quic::DatagramStatus::DATAGRAM_STATUS_SUCCESS ||
@@ -882,6 +904,13 @@ int QuicChromiumClientStream::DeliverInitialHeaders(
       });
 
   *headers = std::move(initial_headers_);
+  // Body data can arrive before the owner consumes the response headers. In
+  // that case OnBodyAvailable() intentionally leaves it buffered while
+  // |headers_delivered_| is false, so consuming the headers must create the
+  // body notification that was suppressed earlier.
+  if (HasBytesToRead()) {
+    NotifyHandleOfDataAvailableLater();
+  }
   return initial_headers_frame_len_;
 }
 

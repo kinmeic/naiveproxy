@@ -5,6 +5,7 @@
 #include "net/socket/connect_job_params_factory.h"
 
 #include <optional>
+#include <string_view>
 #include <variant>
 #include <vector>
 
@@ -168,7 +169,9 @@ ConnectJobParams CreateProxyParams(
     SecureDnsPolicy secure_dns_policy,
     const CommonConnectJobParams* common_connect_job_params,
     const NetworkAnonymizationKey& proxy_dns_network_anonymization_key,
-    handles::NetworkHandle target_network) {
+    handles::NetworkHandle target_network,
+    bool is_udp_tunnel,
+    std::string_view udp_tunnel_uri_template) {
   const ProxyServer& proxy_server =
       proxy_chain.GetProxyServer(proxy_chain_index);
 
@@ -224,7 +227,8 @@ ConnectJobParams CreateProxyParams(
     return ConnectJobParams(base::MakeRefCounted<HttpProxySocketParams>(
         std::move(proxy_server_ssl_config), host_port_pair, proxy_chain,
         proxy_chain_index, should_tunnel, *proxy_annotation_tag,
-        network_anonymization_key, secure_dns_policy, target_network));
+        network_anonymization_key, secure_dns_policy, target_network,
+        is_udp_tunnel, udp_tunnel_uri_template));
   } else if (proxy_chain_index == 0) {
     // At the beginning of the chain, create the only TransportSocketParams
     // object, corresponding to the transport socket we want to create to the
@@ -242,7 +246,9 @@ ConnectJobParams CreateProxyParams(
         proxy_chain_index - 1, proxy_annotation_tag, resolution_callback,
         endpoint_network_anonymization_key, secure_dns_policy,
         common_connect_job_params, proxy_dns_network_anonymization_key,
-        target_network);
+        target_network,
+        /*is_udp_tunnel=*/false,
+        /*udp_tunnel_uri_template=*/{});
   }
 
   // For secure connections, wrap the underlying connection params in SSL
@@ -260,7 +266,8 @@ ConnectJobParams CreateProxyParams(
     params = ConnectJobParams(base::MakeRefCounted<HttpProxySocketParams>(
         std::move(params), host_port_pair, proxy_chain, proxy_chain_index,
         should_tunnel, *proxy_annotation_tag, network_anonymization_key,
-        secure_dns_policy, target_network));
+        secure_dns_policy, target_network, is_udp_tunnel,
+        udp_tunnel_uri_template));
   } else {
     DCHECK(proxy_server.is_socks());
     DCHECK_EQ(1u, proxy_chain.length());
@@ -289,6 +296,8 @@ ConnectJobParams ConstructConnectJobParams(
     const NetworkAnonymizationKey& endpoint_network_anonymization_key,
     SecureDnsPolicy secure_dns_policy,
     bool disable_cert_network_fetches,
+    bool is_udp_tunnel,
+    std::string_view udp_tunnel_uri_template,
     const CommonConnectJobParams* common_connect_job_params,
     const NetworkAnonymizationKey& proxy_dns_network_anonymization_key,
     handles::NetworkHandle target_network) {
@@ -325,7 +334,7 @@ ConnectJobParams ConstructConnectJobParams(
         secure_dns_policy, target_network, resolution_callback,
         SupportedProtocolsFromSSLConfig(ssl_config)));
   } else {
-    bool should_tunnel = force_tunnel || UsingSsl(endpoint) ||
+    bool should_tunnel = force_tunnel || is_udp_tunnel || UsingSsl(endpoint) ||
                          !proxy_chain.is_get_to_proxy_allowed();
     // Begin creating params for the last proxy in the chain. This will
     // recursively create params "backward" through the chain to the first.
@@ -334,7 +343,8 @@ ConnectJobParams ConstructConnectJobParams(
         /*proxy_chain_index=*/proxy_chain.length() - 1, proxy_annotation_tag,
         resolution_callback, endpoint_network_anonymization_key,
         secure_dns_policy, common_connect_job_params,
-        proxy_dns_network_anonymization_key, target_network);
+        proxy_dns_network_anonymization_key, target_network, is_udp_tunnel,
+        udp_tunnel_uri_template);
   }
 
   if (UsingSsl(endpoint)) {

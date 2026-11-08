@@ -7,27 +7,32 @@
 
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "net/base/completion_repeating_callback.h"
-#include "net/base/network_isolation_key.h"
+#include "net/base/network_anonymization_key.h"
 #include "net/log/net_log_with_source.h"
 #include "net/proxy_resolution/proxy_info.h"
 #include "net/ssl/ssl_config.h"
 #include "net/tools/naive/naive_connection.h"
 #include "net/tools/naive/naive_protocol.h"
+#include "net/tools/naive/naive_udp_association.h"
 #include "net/tools/naive/preamble_getter.h"
 
 namespace net {
 
 class ClientSocketHandle;
 class HttpNetworkSession;
+class IPEndPoint;
 class NaiveConnection;
 class ServerSocket;
+class Socks5ServerSocket;
 class StreamSocket;
+class UDPServerSocket;
 struct NetworkTrafficAnnotationTag;
 class RedirectResolver;
 
@@ -42,6 +47,11 @@ class NaiveProxy {
              int idle_timeout,
              RedirectResolver* resolver,
              HttpNetworkSession* session,
+             bool masque_udp,
+             const std::string& masque_udp_path_template,
+             int connect_udp_timeout,
+             int socks_udp_association_timeout,
+             const NaiveUdpAssociationLimits& udp_limits,
              const NetworkTrafficAnnotationTag& traffic_annotation,
              const std::vector<PaddingType>& supported_padding_types);
   ~NaiveProxy();
@@ -63,8 +73,13 @@ class NaiveProxy {
     ~Tunnel();
 
     NetworkAnonymizationKey nak = NetworkAnonymizationKey::CreateTransient();
+    base::TimeTicks nak_created_at = base::TimeTicks::Now();
     base::TimeTicks deadline;
     std::unique_ptr<PreambleGetter> url_getter;
+  };
+
+  struct PendingUdpAssociation {
+    std::unique_ptr<UDPServerSocket> socket;
   };
 
   void OnIOComplete(int result);
@@ -74,6 +89,9 @@ class NaiveProxy {
   int DoPreamble();
   int DoPreambleComplete(int result);
   int DoConnect();
+  int PrepareSocks5UdpAssociate(Socks5ServerSocket* socks_socket,
+                                IPEndPoint* response_endpoint);
+  void OnClientConnectComplete(NaiveConnection* connection, int result);
   void OnConnectComplete(unsigned int connection_id, int result);
   void HandleConnectResult(NaiveConnection* connection, int result);
 
@@ -82,12 +100,16 @@ class NaiveProxy {
   void HandleRunResult(NaiveConnection* connection, int result);
 
   void Close(unsigned int connection_id, int reason);
+  void CloseUdpAssociation(NaiveUdpAssociation* association, int reason);
 
   NaiveConnection* FindConnection(unsigned int connection_id);
+  NaiveConnection* CreateDatagramConnection(const HostPortPair& target);
   NaiveProxyDelegate* naive_proxy_delegate() const;
   bool IsSessionCapable() const;
   bool WillCreateSession(const NetworkAnonymizationKey& nak) const;
   void CleanUpIdleConnections();
+
+  friend class NaiveUdpAssociation;
 
   std::unique_ptr<ServerSocket> listen_socket_;
   ClientProtocol protocol_;
@@ -101,6 +123,11 @@ class NaiveProxy {
   ProxyServer last_proxy_server_;
   RedirectResolver* resolver_;
   HttpNetworkSession* session_;
+  bool masque_udp_;
+  std::string masque_udp_path_template_;
+  base::TimeDelta connect_udp_timeout_;
+  base::TimeDelta socks_udp_association_timeout_;
+  NaiveUdpAssociationLimits udp_limits_;
   NetLogWithSource net_log_;
 
   unsigned int next_id_;
@@ -110,8 +137,15 @@ class NaiveProxy {
   std::unique_ptr<StreamSocket> accepted_socket_;
 
   std::vector<Tunnel> tunnels_;
+  Tunnel* accepted_tunnel_ = nullptr;
 
+  std::map<NaiveConnection*, std::unique_ptr<NaiveConnection>>
+      pending_connections_;
   std::map<unsigned int, std::unique_ptr<NaiveConnection>> connection_by_id_;
+  std::map<Socks5ServerSocket*, PendingUdpAssociation>
+      pending_udp_associations_;
+  std::map<NaiveUdpAssociation*, std::unique_ptr<NaiveUdpAssociation>>
+      udp_associations_;
 
   const NetworkTrafficAnnotationTag& traffic_annotation_;
 

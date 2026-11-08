@@ -1,0 +1,48 @@
+name: UDP over QUIC integration
+on:
+  push:
+    branches: [codex/udp-over-quic]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  udp-linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ^1.26.x
+      - uses: actions/cache@v4
+        with:
+          path: |
+            src/third_party/llvm-build/Release+Asserts
+            src/gn
+          key: udp-linux-toolchain-${{ hashFiles('CHROMIUM_VERSION') }}
+      - run: sudo apt-get update && sudo apt-get install -y ninja-build pkg-config ccache
+      - name: Build naive
+        working-directory: src
+        env:
+          EXTRA_FLAGS: 'target_cpu="x64" chrome_pgo_phase=0'
+        run: |
+          ./get-clang.sh
+          ./build.sh
+      - uses: actions/checkout@v4
+        with:
+          repository: kinmeic/forwardproxy
+          ref: codex/udp-over-quic
+          path: .udp-forwardproxy
+      - name: Build and race-test patched Caddy
+        run: .udp-forwardproxy/scripts/build-udp-caddy.sh "$RUNNER_TEMP/udp-caddy"
+      - name: SOCKS UDP to Caddy DATAGRAM regression
+        run: python3 tests/udp.py --naive src/out/Release/naive --caddy "$RUNNER_TEMP/udp-caddy"
+      - name: TCP regression
+        run: python3 tests/basic.py --naive src/out/Release/naive --server_protocol=http
+      - uses: actions/upload-artifact@v4
+        with:
+          name: udp-linux-binaries
+          path: |
+            src/out/Release/naive
+            ${{ runner.temp }}/udp-caddy

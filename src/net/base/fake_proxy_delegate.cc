@@ -44,6 +44,7 @@ base::expected<HttpRequestHeaders, Error>
 FakeProxyDelegate::OnBeforeTunnelRequest(
     const ProxyChain& proxy_chain,
     size_t proxy_index,
+    ProxyTunnelType tunnel_type,
     OnBeforeTunnelRequestCallback callback) {
   // Callback intentionally ignored; returns synchronously for simplicity.
   return HttpRequestHeaders();
@@ -52,6 +53,7 @@ FakeProxyDelegate::OnBeforeTunnelRequest(
 Error FakeProxyDelegate::OnTunnelHeadersReceived(
     const ProxyChain& proxy_chain,
     size_t proxy_index,
+    ProxyTunnelType tunnel_type,
     const HttpResponseHeaders& response_headers,
     CompletionOnceCallback callback) {
   // Callback intentionally ignored; returns synchronously for simplicity.

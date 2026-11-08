@@ -24,6 +24,7 @@
 #include "net/base/net_errors.h"
 #include "net/base/proxy_chain.h"
 #include "net/base/proxy_delegate.h"
+#include "net/http/connect_udp_helper.h"
 #include "net/http/http_auth_cache.h"
 #include "net/http/http_auth_handler_factory.h"
 #include "net/http/http_log_util.h"
@@ -45,9 +46,12 @@ SpdyProxyClientSocket::SpdyProxyClientSocket(
     const HostPortPair& endpoint,
     const NetLogWithSource& source_net_log,
     scoped_refptr<HttpAuthController> auth_controller,
-    ProxyDelegate* proxy_delegate)
+    ProxyDelegate* proxy_delegate,
+    bool is_udp_tunnel,
+    std::string_view udp_tunnel_uri_template)
     : spdy_stream_(spdy_stream),
       endpoint_(endpoint),
+      is_udp_tunnel_(is_udp_tunnel),
       auth_(std::move(auth_controller)),
       proxy_chain_(proxy_chain),
       proxy_chain_index_(proxy_chain_index),
@@ -58,6 +62,13 @@ SpdyProxyClientSocket::SpdyProxyClientSocket(
       source_dependency_(source_net_log.source()) {
   request_.method = "CONNECT";
   request_.url = GURL("https://" + endpoint.ToString());
+  if (is_udp_tunnel_) {
+    CHECK(!proxy_chain.is_direct());
+    CHECK_EQ(proxy_chain_index, proxy_chain.length() - 1);
+    request_.url = BuildConnectUdpUrl(proxy_chain, proxy_chain_index, endpoint,
+                                      udp_tunnel_uri_template);
+    request_.extra_headers.SetHeader("capsule-protocol", "?1");
+  }
   if (endpoint.host() == "preamble") {
     preamble_index_ = endpoint.port();
     CHECK(!proxy_chain.is_direct());
@@ -456,6 +467,8 @@ int SpdyProxyClientSocket::DoCalculateHeaders() {
         proxy_delegate_headers_,
         proxy_delegate_->OnBeforeTunnelRequest(
             proxy_chain_, proxy_chain_index_,
+            is_udp_tunnel_ ? ProxyTunnelType::kConnectUdp
+                           : ProxyTunnelType::kConnect,
             base::BindOnce(
                 &SpdyProxyClientSocket::OnBeforeTunnelRequestComplete,
                 weak_factory_.GetWeakPtr())),
@@ -506,6 +519,11 @@ int SpdyProxyClientSocket::DoCalculateHeadersComplete(int result) {
     }
   }
   request_.extra_headers.MergeFrom(proxy_delegate_headers_);
+  if (is_udp_tunnel_) {
+    // This protocol header is mandatory and cannot be overridden by user
+    // supplied extra headers.
+    request_.extra_headers.SetHeader("capsule-protocol", "?1");
+  }
   return result;
 }
 
@@ -521,8 +539,14 @@ int SpdyProxyClientSocket::DoSendRequest() {
                        request_line, &request_.extra_headers);
 
   quiche::HttpHeaderBlock headers;
-  CreateSpdyHeadersFromHttpRequest(request_, std::nullopt,
-                                   request_.extra_headers, &headers);
+  if (is_udp_tunnel_) {
+    CreateSpdyHeadersFromHttpRequestForExtendedConnect(
+        request_, std::nullopt, "connect-udp", request_.extra_headers,
+        &headers);
+  } else {
+    CreateSpdyHeadersFromHttpRequest(request_, std::nullopt,
+                                     request_.extra_headers, &headers);
+  }
 
   if (preamble_index_.has_value()) {
     return spdy_stream_->SendRequestHeaders(std::move(headers),
@@ -577,7 +601,10 @@ int SpdyProxyClientSocket::DoProcessResponseHeaders() {
       return OK;
     }
     return proxy_delegate_->OnTunnelHeadersReceived(
-        proxy_chain_, proxy_chain_index_, *response_.headers,
+        proxy_chain_, proxy_chain_index_,
+        is_udp_tunnel_ ? ProxyTunnelType::kConnectUdp
+                       : ProxyTunnelType::kConnect,
+        *response_.headers,
         base::BindOnce(&SpdyProxyClientSocket::OnIOComplete,
                        weak_factory_.GetWeakPtr()));
   }
@@ -601,17 +628,22 @@ int SpdyProxyClientSocket::DoProcessResponseCode() {
     next_state_ = STATE_OPEN;
     return OK;
   }
-  switch (response_.headers->response_code()) {
-    case 200:  // OK
-      next_state_ = STATE_OPEN;
-      return OK;
+  int response_code = response_.headers->response_code();
+  if ((!is_udp_tunnel_ && response_code == 200) ||
+      (is_udp_tunnel_ && IsSuccessfulConnectUdpResponse(*response_.headers))) {
+    next_state_ = STATE_OPEN;
+    return OK;
+  }
 
+  switch (response_code) {
     case 407:  // Proxy Authentication Required
       next_state_ = STATE_OPEN;
       SanitizeProxyAuth(response_);
       return HandleProxyAuthChallenge(auth_.get(), &response_, net_log_);
 
     default:
+      DLOG_IF(WARNING, is_udp_tunnel_)
+          << "CONNECT-UDP proxy returned status " << response_code;
       // Ignore response to avoid letting the proxy impersonate the target
       // server.  (See http://crbug.com/137891.)
       return ERR_TUNNEL_CONNECTION_FAILED;

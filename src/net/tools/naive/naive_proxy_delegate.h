@@ -41,10 +41,12 @@ class NaiveProxyDelegate : public ProxyDelegate {
   base::expected<HttpRequestHeaders, Error> OnBeforeTunnelRequest(
       const ProxyChain& proxy_chain,
       size_t chain_index,
+      ProxyTunnelType tunnel_type,
       OnBeforeTunnelRequestCallback callback) override;
 
   Error OnTunnelHeadersReceived(const ProxyChain& proxy_chain,
                                 size_t chain_index,
+                                ProxyTunnelType tunnel_type,
                                 const HttpResponseHeaders& response_headers,
                                 CompletionOnceCallback callback) override;
 
@@ -73,11 +75,15 @@ class NaiveProxyDelegate : public ProxyDelegate {
       const ProxyServer& proxy_server,
       size_t preamble_index) const;
 
+  void SetUdpAuthorization(const ProxyServer& server, std::string value);
+
  private:
   static std::optional<PaddingType> ParsePaddingHeaders(
       const HttpResponseHeaders& headers);
 
   HttpRequestHeaders extra_headers_;
+  HttpRequestHeaders udp_extra_headers_;
+  std::map<ProxyServer, std::string> udp_authorization_;
 
   // Empty value means padding type has not been negotiated.
   std::map<ProxyServer, std::optional<PaddingType>> padding_type_by_server_;

@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <utility>
+#include <vector>
 
 #include "base/containers/extend.h"
 #include "base/functional/bind.h"
@@ -40,6 +41,7 @@ static constexpr uint8_t kSubnegotiationVersion = '\x01';
 static constexpr uint8_t kAuthStatusSuccess = '\x00';
 static constexpr uint8_t kAuthStatusFailure = '\xff';
 static constexpr uint8_t kReplySuccess = '\x00';
+static constexpr uint8_t kReplyGeneralFailure = '\x01';
 static constexpr uint8_t kReplyCommandNotSupported = '\x07';
 
 static_assert(sizeof(struct in_addr) == 4, "incorrect system size of IPv4");
@@ -49,7 +51,9 @@ Socks5ServerSocket::Socks5ServerSocket(
     std::unique_ptr<StreamSocket> transport_socket,
     const std::string& user,
     const std::string& pass,
-    const NetworkTrafficAnnotationTag& traffic_annotation)
+    const NetworkTrafficAnnotationTag& traffic_annotation,
+    base::OnceCallback<int(Socks5ServerSocket*, IPEndPoint*)>
+        udp_associate_callback)
     : transport_(std::move(transport_socket)),
       next_state_(STATE_NONE),
       completed_handshake_(false),
@@ -57,6 +61,8 @@ Socks5ServerSocket::Socks5ServerSocket(
       was_ever_used_(false),
       user_(user),
       pass_(pass),
+      command_(Command::kConnect),
+      udp_associate_callback_(std::move(udp_associate_callback)),
       net_log_(transport_->NetLog()),
       traffic_annotation_(traffic_annotation) {
   io_callback_ = base::BindRepeating(&Socks5ServerSocket::OnIOComplete,
@@ -85,6 +91,8 @@ int Socks5ServerSocket::Connect(CompletionOnceCallback callback) {
 
   next_state_ = STATE_GREET_READ;
   buffer_.clear();
+  request_endpoint_ = HostPortPair();
+  command_ = Command::kConnect;
 
   int rv = DoLoop(OK);
   if (rv == ERR_IO_PENDING) {
@@ -538,12 +546,24 @@ int Socks5ServerSocket::DoHandshakeReadComplete(int result) {
     }
     SocksCommandType command = static_cast<SocksCommandType>(buffer_[1]);
     if (command == kCommandConnect) {
+      command_ = Command::kConnect;
       // The proxy replies with success immediately without first connecting
       // to the requested endpoint.
       reply_ = kReplySuccess;
-    } else if (command == kCommandBind || command == kCommandUDPAssociate) {
+    } else if (command == kCommandBind) {
+      command_ = Command::kBind;
       reply_ = kReplyCommandNotSupported;
+    } else if (command == kCommandUDPAssociate) {
+      command_ = Command::kUdpAssociate;
+      if (udp_associate_callback_) {
+        // The relay endpoint is allocated only after the complete request is
+        // read. Treat this as provisionally supported until then.
+        reply_ = kReplySuccess;
+      } else {
+        reply_ = kReplyCommandNotSupported;
+      }
     } else {
+      reply_ = kReplyCommandNotSupported;
       net_log_.AddEventWithIntParams(NetLogEventType::SOCKS_UNEXPECTED_COMMAND,
                                      "commmand", buffer_[1]);
       return ERR_SOCKS_CONNECTION_FAILED;
@@ -597,6 +617,16 @@ int Socks5ServerSocket::DoHandshakeReadComplete(int result) {
       IPEndPoint endpoint(ip_addr, port_host);
       request_endpoint_ = HostPortPair::FromIPEndPoint(endpoint);
     }
+    if (command_ == Command::kUdpAssociate && udp_associate_callback_) {
+      IPEndPoint endpoint;
+      int rv = std::move(udp_associate_callback_).Run(this, &endpoint);
+      if (rv == OK) {
+        udp_associate_response_endpoint_ = std::move(endpoint);
+        reply_ = kReplySuccess;
+      } else {
+        reply_ = kReplyGeneralFailure;
+      }
+    }
     buffer_.clear();
     next_state_ = STATE_HANDSHAKE_WRITE;
     return OK;
@@ -611,16 +641,35 @@ int Socks5ServerSocket::DoHandshakeWrite() {
   next_state_ = STATE_HANDSHAKE_WRITE_COMPLETE;
 
   if (buffer_.empty()) {
+    std::vector<uint8_t> bound_address = {0x00, 0x00, 0x00, 0x00};
+    SocksEndPointAddressType bound_address_type = kEndPointResolvedIPv4;
+    uint16_t bound_port = 0;
+
+    if (reply_ == kReplySuccess && command_ == Command::kUdpAssociate) {
+      DCHECK(udp_associate_response_endpoint_.has_value());
+      const IPEndPoint& endpoint = *udp_associate_response_endpoint_;
+      bound_port = endpoint.port();
+      if (endpoint.address().IsIPv4()) {
+        bound_address_type = kEndPointResolvedIPv4;
+      } else {
+        DCHECK(endpoint.address().IsIPv6());
+        bound_address_type = kEndPointResolvedIPv6;
+      }
+      bound_address.assign(endpoint.address().bytes().begin(),
+                           endpoint.address().bytes().end());
+    }
+
     buffer_ = {
         // clang-format off
         kSOCKS5Version,
         reply_,
         kSOCKS5Reserved,
-        kEndPointResolvedIPv4,
-        0x00, 0x00, 0x00, 0x00,  // BND.ADDR
-        0x00, 0x00,  // BND.PORT
+        static_cast<uint8_t>(bound_address_type),
         // clang-format on
     };
+    base::Extend(buffer_, bound_address);
+    buffer_.push_back(static_cast<uint8_t>(bound_port >> 8));
+    buffer_.push_back(static_cast<uint8_t>(bound_port & 0xff));
     bytes_sent_ = 0;
   }
 

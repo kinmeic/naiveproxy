@@ -168,6 +168,8 @@ class NET_EXPORT_PRIVATE QuicChromiumClientStream
     // session are closed.
     quic::QuicPacketLength GetGuaranteedLargestMessagePayload() const;
 
+    int CheckConnectUdpSupport() const;
+
     bool SupportsH3Datagram() const {
       return stream_ && stream_->SupportsH3Datagram();
     }

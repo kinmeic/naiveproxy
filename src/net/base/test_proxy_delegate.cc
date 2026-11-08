@@ -165,6 +165,7 @@ base::expected<HttpRequestHeaders, Error>
 TestProxyDelegate::OnBeforeTunnelRequest(
     const ProxyChain& proxy_chain,
     size_t proxy_index,
+    ProxyTunnelType tunnel_type,
     OnBeforeTunnelRequestCallback callback) {
   on_before_tunnel_request_call_count_++;
 
@@ -192,6 +193,7 @@ TestProxyDelegate::OnBeforeTunnelRequest(
 Error TestProxyDelegate::OnTunnelHeadersReceived(
     const ProxyChain& proxy_chain,
     size_t proxy_index,
+    ProxyTunnelType tunnel_type,
     const HttpResponseHeaders& response_headers,
     CompletionOnceCallback callback) {
   on_tunnel_headers_received_headers_.push_back(

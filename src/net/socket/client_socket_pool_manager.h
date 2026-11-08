@@ -9,6 +9,7 @@
 #ifndef NET_SOCKET_CLIENT_SOCKET_POOL_MANAGER_H_
 #define NET_SOCKET_CLIENT_SOCKET_POOL_MANAGER_H_
 
+#include <string_view>
 #include <vector>
 
 #include "base/values.h"
@@ -97,7 +98,9 @@ int InitSocketHandleForHttpRequest(
     const NetLogWithSource& net_log,
     ClientSocketHandle* socket_handle,
     CompletionOnceCallback callback,
-    const ClientSocketPool::ProxyAuthCallback& proxy_auth_callback);
+    const ClientSocketPool::ProxyAuthCallback& proxy_auth_callback,
+    bool is_udp = false,
+    std::string_view udp_tunnel_uri_template = {});
 
 // A helper method that uses the passed in proxy information to initialize a
 // ClientSocketHandle with the relevant socket pool. Use this method for

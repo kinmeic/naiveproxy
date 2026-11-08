@@ -8,6 +8,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 
 #include "base/functional/callback_forward.h"
 #include "base/memory/ref_counted.h"
@@ -66,7 +67,9 @@ class NET_EXPORT_PRIVATE HttpProxySocketParams
       const NetworkTrafficAnnotationTag traffic_annotation,
       const NetworkAnonymizationKey& network_anonymization_key,
       SecureDnsPolicy secure_dns_policy,
-      handles::NetworkHandle target_network);
+      handles::NetworkHandle target_network,
+      bool is_udp_tunnel = false,
+      std::string_view udp_tunnel_uri_template = {});
 
   // Construct an `HttpProxyConnectJob` over a QUIC connection using the given
   // SSL config.
@@ -84,7 +87,9 @@ class NET_EXPORT_PRIVATE HttpProxySocketParams
       const NetworkTrafficAnnotationTag traffic_annotation,
       const NetworkAnonymizationKey& network_anonymization_key,
       SecureDnsPolicy secure_dns_policy,
-      handles::NetworkHandle target_network);
+      handles::NetworkHandle target_network,
+      bool is_udp_tunnel = false,
+      std::string_view udp_tunnel_uri_template = {});
 
   HttpProxySocketParams(const HttpProxySocketParams&) = delete;
   HttpProxySocketParams& operator=(const HttpProxySocketParams&) = delete;
@@ -126,6 +131,10 @@ class NET_EXPORT_PRIVATE HttpProxySocketParams
   }
   size_t proxy_chain_index() const { return proxy_chain_index_; }
   bool tunnel() const { return tunnel_; }
+  bool is_udp_tunnel() const { return is_udp_tunnel_; }
+  const std::string& udp_tunnel_uri_template() const {
+    return udp_tunnel_uri_template_;
+  }
   const NetworkAnonymizationKey& network_anonymization_key() const {
     return network_anonymization_key_;
   }
@@ -147,7 +156,9 @@ class NET_EXPORT_PRIVATE HttpProxySocketParams
       const NetworkTrafficAnnotationTag traffic_annotation,
       const NetworkAnonymizationKey& network_anonymization_key,
       SecureDnsPolicy secure_dns_policy,
-      handles::NetworkHandle target_network);
+      handles::NetworkHandle target_network,
+      bool is_udp_tunnel,
+      std::string_view udp_tunnel_uri_template);
   ~HttpProxySocketParams();
 
   const std::optional<ConnectJobParams> nested_params_;
@@ -156,6 +167,10 @@ class NET_EXPORT_PRIVATE HttpProxySocketParams
   const ProxyChain proxy_chain_;
   const size_t proxy_chain_index_;
   const bool tunnel_;
+  // Naive sends CONNECT-UDP as extended CONNECT without waiting for the proxy
+  // to advertise SETTINGS_ENABLE_CONNECT_PROTOCOL.
+  const bool is_udp_tunnel_;
+  const std::string udp_tunnel_uri_template_;
   const NetworkAnonymizationKey network_anonymization_key_;
   const NetworkTrafficAnnotationTag traffic_annotation_;
   const SecureDnsPolicy secure_dns_policy_;

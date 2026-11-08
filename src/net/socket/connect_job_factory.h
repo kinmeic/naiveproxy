@@ -7,6 +7,7 @@
 
 #include <memory>
 #include <optional>
+#include <string_view>
 #include <variant>
 #include <vector>
 
@@ -98,6 +99,8 @@ class NET_EXPORT_PRIVATE ConnectJobFactory {
       const NetworkAnonymizationKey& network_anonymization_key,
       SecureDnsPolicy secure_dns_policy,
       bool disable_cert_network_fetches,
+      bool is_udp_tunnel,
+      std::string_view udp_tunnel_uri_template,
       const CommonConnectJobParams* common_connect_job_params,
       handles::NetworkHandle target_network,
       ConnectJob::Delegate* delegate) const;
@@ -135,6 +138,8 @@ class NET_EXPORT_PRIVATE ConnectJobFactory {
       const NetworkAnonymizationKey& network_anonymization_key,
       SecureDnsPolicy secure_dns_policy,
       bool disable_cert_network_fetches,
+      bool is_udp_tunnel,
+      std::string_view udp_tunnel_uri_template,
       const CommonConnectJobParams* common_connect_job_params,
       handles::NetworkHandle target_network,
       ConnectJob::Delegate* delegate) const;

@@ -7,12 +7,16 @@
 #include <iostream>
 #include <utility>
 
+#include "base/files/file_util.h"
 #include "base/strings/escape.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_tokenizer.h"
 #include "net/base/proxy_server.h"
 #include "net/base/proxy_string_util.h"
 #include "net/base/url_util.h"
+#include "net/cert/x509_certificate.h"
+#include "net/cert/x509_util.h"
+#include "net/http/connect_udp_helper.h"
 #include "url/gurl.h"
 
 namespace net {
@@ -23,6 +27,27 @@ ProxyServer MyProxyUriToProxyServer(std::string_view uri) {
                                                uri.substr(7));
   }
   return ProxyUriToProxyServer(uri, ProxyServer::SCHEME_INVALID);
+}
+
+bool ParseSizeLimit(const base::DictValue& value,
+                    std::string_view name,
+                    size_t* output) {
+  const base::Value* v = value.Find(name);
+  if (!v) {
+    return true;
+  }
+  if (std::optional<int> i = v->GetIfInt()) {
+    if (*i >= 0) {
+      *output = static_cast<size_t>(*i);
+      return true;
+    }
+  } else if (const std::string* str = v->GetIfString()) {
+    if (base::StringToSizeT(*str, output)) {
+      return true;
+    }
+  }
+  std::cerr << "Invalid " << name << std::endl;
+  return false;
 }
 }  // namespace
 
@@ -157,11 +182,107 @@ bool NaiveConfig::Parse(const base::DictValue& value) {
     }
   }
 
+  if (const base::Value* v = value.Find("trusted-cert")) {
+    const std::string* path = v->GetIfString();
+    std::string contents;
+    if (!path || path->empty() ||
+        !base::ReadFileToStringWithMaxSize(
+            base::FilePath::FromUTF8Unsafe(*path), &contents, 1024 * 1024)) {
+      std::cerr << "Cannot read trusted-cert CA bundle" << std::endl;
+      return false;
+    }
+    auto certs = X509Certificate::CreateCertificateListFromBytes(
+        base::as_byte_span(contents), X509Certificate::FORMAT_AUTO);
+    if (certs.empty()) {
+      std::cerr << "Empty trusted-cert CA bundle" << std::endl;
+      return false;
+    }
+    for (const auto& cert : certs) {
+      auto parsed = x509_util::CreateParsedCertificate(
+          bssl::UpRef(cert->cert_buffer()), nullptr);
+      if (!parsed) {
+        std::cerr << "Invalid trusted-cert certificate" << std::endl;
+        return false;
+      }
+      trusted_certificates.push_back(std::move(parsed));
+    }
+  }
+
   if (const base::Value* v = value.Find("extra-headers")) {
     if (const std::string* str = v->GetIfString()) {
       extra_headers.AddHeadersFromString(*str);
     } else {
       std::cerr << "Invalid extra-headers" << std::endl;
+      return false;
+    }
+  }
+
+  if (const base::Value* v = value.Find("masque-udp")) {
+    if (std::optional<bool> b = v->GetIfBool()) {
+      masque_udp = *b;
+    } else if (const std::string* str = v->GetIfString()) {
+      if (*str == "true" || *str == "1") {
+        masque_udp = true;
+      } else if (*str == "false" || *str == "0") {
+        masque_udp = false;
+      } else {
+        std::cerr << "Invalid masque-udp" << std::endl;
+        return false;
+      }
+    } else {
+      std::cerr << "Invalid masque-udp" << std::endl;
+      return false;
+    }
+  }
+
+  if (const base::Value* v = value.Find("masque-udp-path-template")) {
+    if (const std::string* str = v->GetIfString(); str && !str->empty()) {
+      if (!IsValidConnectUdpPathTemplate(*str)) {
+        std::cerr << "Invalid masque-udp-path-template" << std::endl;
+        return false;
+      }
+      masque_udp_path_template = *str;
+    } else {
+      std::cerr << "Invalid masque-udp-path-template" << std::endl;
+      return false;
+    }
+  }
+
+  for (auto [name, timeout] : {
+           std::pair{"connect-udp-timeout", &connect_udp_timeout},
+           std::pair{"socks-udp-association-timeout",
+                     &socks_udp_association_timeout},
+       }) {
+    if (const base::Value* v = value.Find(name)) {
+      if (std::optional<int> i = v->GetIfInt()) {
+        *timeout = *i;
+      } else if (const std::string* str = v->GetIfString()) {
+        if (!base::StringToInt(*str, timeout)) {
+          std::cerr << "Invalid " << name << std::endl;
+          return false;
+        }
+      } else {
+        std::cerr << "Invalid " << name << std::endl;
+        return false;
+      }
+      if (*timeout < 1) {
+        std::cerr << "Invalid " << name << std::endl;
+        return false;
+      }
+    }
+  }
+
+  for (auto [name, limit] : {
+           std::pair{"udp-max-target-flows", &udp_limits.max_target_flows},
+           std::pair{"udp-max-queued-datagrams-per-flow",
+                     &udp_limits.max_queued_datagrams_per_flow},
+           std::pair{"udp-max-queued-bytes-per-flow",
+                     &udp_limits.max_queued_bytes_per_flow},
+           std::pair{"udp-max-queued-sends", &udp_limits.max_queued_udp_sends},
+           std::pair{"udp-max-queued-send-bytes",
+                     &udp_limits.max_queued_udp_send_bytes},
+       }) {
+    if (!ParseSizeLimit(value, name, limit)) {
       return false;
     }
   }

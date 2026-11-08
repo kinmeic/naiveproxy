@@ -10,6 +10,7 @@
 
 #include <memory>
 #include <string>
+#include <string_view>
 
 #include "base/containers/span.h"
 #include "base/memory/raw_ptr.h"
@@ -55,7 +56,9 @@ class NET_EXPORT_PRIVATE SpdyProxyClientSocket : public ProxyClientSocket,
                         const HostPortPair& endpoint,
                         const NetLogWithSource& source_net_log,
                         scoped_refptr<HttpAuthController> auth_controller,
-                        ProxyDelegate* proxy_delegate);
+                        ProxyDelegate* proxy_delegate,
+                        bool is_udp_tunnel = false,
+                        std::string_view udp_tunnel_uri_template = {});
 
   SpdyProxyClientSocket(const SpdyProxyClientSocket&) = delete;
   SpdyProxyClientSocket& operator=(const SpdyProxyClientSocket&) = delete;
@@ -177,6 +180,7 @@ class NET_EXPORT_PRIVATE SpdyProxyClientSocket : public ProxyClientSocket,
   // The hostname and port of the endpoint.  This is not necessarily the one
   // specified by the URL, due to Alternate-Protocol or fixed testing ports.
   const HostPortPair endpoint_;
+  const bool is_udp_tunnel_;
   scoped_refptr<HttpAuthController> auth_;
 
   const ProxyChain proxy_chain_;

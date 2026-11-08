@@ -125,7 +125,9 @@ ClientSocketPool::GroupId::GroupId(
     NetworkAnonymizationKey network_anonymization_key,
     SecureDnsPolicy secure_dns_policy,
     bool disable_cert_network_fetches,
-    handles::NetworkHandle target_network)
+    handles::NetworkHandle target_network,
+    bool is_udp_tunnel,
+    std::string_view udp_tunnel_uri_template)
     : destination_(std::move(destination)),
       privacy_mode_(privacy_mode),
       network_anonymization_key_(
@@ -134,7 +136,9 @@ ClientSocketPool::GroupId::GroupId(
               : NetworkAnonymizationKey()),
       secure_dns_policy_(secure_dns_policy),
       disable_cert_network_fetches_(disable_cert_network_fetches),
-      target_network_(target_network) {
+      target_network_(target_network),
+      is_udp_tunnel_(is_udp_tunnel),
+      udp_tunnel_uri_template_(udp_tunnel_uri_template) {
   DCHECK(destination_.IsValid());
 
   // ClientSocketPool only expected to be used for HTTP/HTTPS/WS/WSS cases, and
@@ -161,6 +165,9 @@ std::string ClientSocketPool::GroupId::ToString() const {
        target_network_ != handles::kInvalidNetworkHandle
            ? base::StrCat(
                  {"target_network=", base::ToString(target_network_), "/"})
+           : "",
+       is_udp_tunnel_
+           ? base::StrCat({"udp_tunnel=", udp_tunnel_uri_template_, "/"})
            : "",
        destination_.Serialize(),
        NetworkAnonymizationKey::IsPartitioningEnabled()
@@ -260,6 +267,7 @@ std::unique_ptr<ConnectJob> ClientSocketPool::CreateConnectJob(
       group_id.privacy_mode(), resolution_callback, request_priority,
       socket_tag, group_id.network_anonymization_key(),
       group_id.secure_dns_policy(), group_id.disable_cert_network_fetches(),
+      group_id.is_udp_tunnel(), group_id.udp_tunnel_uri_template(),
       common_connect_job_params_, group_id.target_network(), delegate);
 }
 

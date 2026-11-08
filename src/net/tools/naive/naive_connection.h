@@ -7,13 +7,17 @@
 #define NET_TOOLS_NAIVE_NAIVE_CONNECTION_H_
 
 #include <memory>
+#include <optional>
 #include <string>
 
+#include "base/check.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "net/base/completion_once_callback.h"
 #include "net/base/completion_repeating_callback.h"
+#include "net/base/host_port_pair.h"
+#include "net/base/network_anonymization_key.h"
 #include "net/tools/naive/naive_padding_socket.h"
 #include "net/tools/naive/naive_protocol.h"
 #include "net/tools/naive/naive_proxy_delegate.h"
@@ -25,19 +29,18 @@ class DrainableIOBuffer;
 class HttpNetworkSession;
 class IOBuffer;
 class NetLogWithSource;
+class NaiveProxy;
 class ProxyInfo;
 class StreamSocket;
 struct NetworkTrafficAnnotationTag;
 struct SSLConfig;
 class RedirectResolver;
-class NetworkAnonymizationKey;
 
 class NaiveConnection {
  public:
   using TimeFunc = base::TimeTicks (*)();
 
-  NaiveConnection(unsigned int id,
-                  ClientProtocol protocol,
+  NaiveConnection(ClientProtocol protocol,
                   std::unique_ptr<PaddingType> negotiated_client_padding,
                   const ProxyInfo& proxy_info,
                   RedirectResolver* resolver,
@@ -45,21 +48,39 @@ class NaiveConnection {
                   const NetworkAnonymizationKey& network_anonymization_key,
                   const NetLogWithSource& net_log,
                   std::unique_ptr<StreamSocket> accepted_socket,
-                  const NetworkTrafficAnnotationTag& traffic_annotation);
+                  const NetworkTrafficAnnotationTag& traffic_annotation,
+                  std::optional<HostPortPair> datagram_target = std::nullopt,
+                  std::string masque_udp_path_template = {});
   ~NaiveConnection();
   NaiveConnection(const NaiveConnection&) = delete;
   NaiveConnection& operator=(const NaiveConnection&) = delete;
 
-  unsigned int id() const { return id_; }
-  int Connect(CompletionOnceCallback callback);
+  unsigned int id() const {
+    DCHECK(id_.has_value());
+    return *id_;
+  }
+  bool is_datagram() const { return datagram_target_.has_value(); }
+  bool is_socks_udp_associate() const;
+  int ConnectClient(CompletionOnceCallback callback);
+  int ConnectServer(CompletionOnceCallback callback);
   void Disconnect();
   int Run(CompletionOnceCallback callback);
   const NetworkAnonymizationKey& network_anonymization_key() const {
     return network_anonymization_key_;
   }
+  // Returns the datagram payload size. Empty datagrams return zero; stream EOF
+  // is reported as ERR_CONNECTION_CLOSED by the tunnel.
+  int ReadDatagramFromServer(IOBuffer* buf,
+                             int buf_len,
+                             CompletionOnceCallback callback);
+  int WriteDatagramToServer(IOBuffer* buf,
+                            int buf_len,
+                            CompletionOnceCallback callback);
   base::TimeTicks GetLastWriteTime() const;
 
  private:
+  friend class NaiveProxy;
+
   enum State {
     STATE_CONNECT_CLIENT,
     STATE_CONNECT_CLIENT_COMPLETE,
@@ -93,9 +114,16 @@ class NaiveConnection {
   void OnPullComplete(Direction from, Direction to, int result);
   void OnPushComplete(Direction from, Direction to, int result);
 
+  void set_id(unsigned int id) {
+    DCHECK(!id_.has_value());
+    id_ = id;
+  }
+  StreamSocket* client_socket() const { return client_socket_.get(); }
+  std::unique_ptr<StreamSocket> ReleaseClientSocket();
+
   std::optional<PaddingType> GetServerPaddingType() const;
 
-  unsigned int id_;
+  std::optional<unsigned int> id_;
   ClientProtocol protocol_;
   std::unique_ptr<PaddingType> negotiated_client_padding_;
   const ProxyInfo& proxy_info_;
@@ -112,6 +140,9 @@ class NaiveConnection {
 
   std::unique_ptr<StreamSocket> client_socket_;
   std::unique_ptr<ClientSocketHandle> server_socket_handle_;
+
+  std::optional<HostPortPair> datagram_target_;
+  std::string masque_udp_path_template_;
 
   std::unique_ptr<NaivePaddingSocket> sockets_[kNumDirections];
   scoped_refptr<IOBuffer> read_buffers_[kNumDirections];

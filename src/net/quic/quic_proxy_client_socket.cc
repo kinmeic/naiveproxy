@@ -10,13 +10,16 @@
 
 #include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/types/expected.h"
 #include "base/types/expected_macros.h"
 #include "base/values.h"
 #include "net/base/completion_once_callback.h"
+#include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/base/proxy_chain.h"
 #include "net/base/proxy_delegate.h"
+#include "net/http/connect_udp_helper.h"
 #include "net/http/http_auth_controller.h"
 #include "net/http/http_log_util.h"
 #include "net/http/http_response_headers.h"
@@ -25,6 +28,7 @@
 #include "net/quic/quic_http_utils.h"
 #include "net/spdy/spdy_http_utils.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
+#include "url/gurl.h"
 
 namespace net {
 
@@ -37,10 +41,13 @@ QuicProxyClientSocket::QuicProxyClientSocket(
     const HostPortPair& endpoint,
     const NetLogWithSource& net_log,
     scoped_refptr<HttpAuthController> auth_controller,
-    ProxyDelegate* proxy_delegate)
+    ProxyDelegate* proxy_delegate,
+    bool is_udp_tunnel,
+    std::string_view udp_tunnel_uri_template)
     : stream_(std::move(stream)),
       session_(std::move(session)),
       endpoint_(endpoint),
+      is_udp_tunnel_(is_udp_tunnel),
       auth_(std::move(auth_controller)),
       proxy_chain_(proxy_chain),
       proxy_chain_index_(proxy_chain_index),
@@ -53,6 +60,13 @@ QuicProxyClientSocket::QuicProxyClientSocket(
 
   request_.method = "CONNECT";
   request_.url = GURL("https://" + endpoint.ToString());
+  if (is_udp_tunnel_) {
+    CHECK(!proxy_chain.is_direct());
+    CHECK_EQ(proxy_chain_index, proxy_chain.length() - 1);
+    request_.url = BuildConnectUdpUrl(proxy_chain, proxy_chain_index, endpoint,
+                                      udp_tunnel_uri_template);
+    request_.extra_headers.SetHeader("capsule-protocol", "?1");
+  }
   if (endpoint.host() == "preamble") {
     preamble_index_ = endpoint.port();
     CHECK(!proxy_chain.is_direct());
@@ -120,6 +134,15 @@ int QuicProxyClientSocket::Connect(CompletionOnceCallback callback) {
 }
 
 void QuicProxyClientSocket::Disconnect() {
+  weak_factory_.InvalidateWeakPtrs();
+  if (udp_visitor_registered_) {
+    stream_->UnregisterHttp3DatagramVisitor();
+    udp_visitor_registered_ = false;
+  }
+  udp_control_buffer_ = nullptr;
+  udp_datagrams_ = {};
+  udp_queue_bytes_ = 0;
+
   connect_callback_.Reset();
   read_callback_.Reset();
   read_buf_ = nullptr;
@@ -177,6 +200,9 @@ void QuicProxyClientSocket::ApplySocketTag(const SocketTag& tag) {
 int QuicProxyClientSocket::Read(IOBuffer* buf,
                                 int buf_len,
                                 CompletionOnceCallback callback) {
+  if (is_udp_tunnel_) {
+    return ReadUdp(buf, buf_len, std::move(callback));
+  }
   DCHECK(connect_callback_.is_null());
   DCHECK(read_callback_.is_null());
   DCHECK(!read_buf_);
@@ -196,19 +222,27 @@ int QuicProxyClientSocket::Read(IOBuffer* buf,
   if (rv == ERR_IO_PENDING) {
     read_callback_ = std::move(callback);
     read_buf_ = buf;
-  } else if (rv == 0) {
-    net_log_.AddByteTransferEvent(NetLogEventType::SOCKET_BYTES_RECEIVED, 0,
-                                  nullptr);
-  } else if (rv > 0) {
-    net_log_.AddByteTransferEvent(NetLogEventType::SOCKET_BYTES_RECEIVED, rv,
-                                  buf->data());
+  } else {
+    if (rv >= 0 && stream_->IsDoneReading()) {
+      stream_->OnFinRead();
+    }
+    if (rv == 0) {
+      net_log_.AddByteTransferEvent(NetLogEventType::SOCKET_BYTES_RECEIVED, 0,
+                                    nullptr);
+    } else if (rv > 0) {
+      net_log_.AddByteTransferEvent(NetLogEventType::SOCKET_BYTES_RECEIVED, rv,
+                                    buf->data());
+    }
   }
   return rv;
 }
 
 void QuicProxyClientSocket::OnReadComplete(int rv) {
-  if (!stream_->IsOpen())
+  if (!stream_->IsOpen()) {
     rv = 0;
+  } else if (rv >= 0 && stream_->IsDoneReading()) {
+    stream_->OnFinRead();
+  }
 
   if (!read_callback_.is_null()) {
     DCHECK(read_buf_);
@@ -226,12 +260,14 @@ int QuicProxyClientSocket::Write(
     int buf_len,
     CompletionOnceCallback callback,
     const NetworkTrafficAnnotationTag& traffic_annotation) {
+  if (is_udp_tunnel_) {
+    return WriteUdp(buf, buf_len);
+  }
   DCHECK(connect_callback_.is_null());
   DCHECK(write_callback_.is_null());
 
   if (next_state_ != STATE_CONNECT_COMPLETE)
     return ERR_SOCKET_NOT_CONNECTED;
-
   net_log_.AddByteTransferEvent(NetLogEventType::SOCKET_BYTES_SENT, buf_len,
                                 buf->data());
 
@@ -395,6 +431,8 @@ int QuicProxyClientSocket::DoCalculateHeaders() {
         proxy_delegate_headers_,
         proxy_delegate_->OnBeforeTunnelRequest(
             proxy_chain_, proxy_chain_index_,
+            is_udp_tunnel_ ? ProxyTunnelType::kConnectUdp
+                           : ProxyTunnelType::kConnect,
             base::BindOnce(
                 &QuicProxyClientSocket::OnBeforeTunnelRequestComplete,
                 weak_factory_.GetWeakPtr())),
@@ -417,7 +455,7 @@ int QuicProxyClientSocket::DoCalculateHeadersComplete(int result) {
   if (proxy_delegate_headers_.HasHeader("fastopen")) {
     proxy_delegate_headers_.RemoveHeader("fastopen");
     // TODO(klzgrad): look into why Fast Open does not work.
-    use_fastopen_ = true;
+    use_fastopen_ = !is_udp_tunnel_;
   }
   if (preamble_index_.has_value()) {
     authorization_headers_.Clear();
@@ -450,10 +488,32 @@ int QuicProxyClientSocket::DoCalculateHeadersComplete(int result) {
     }
   }
   request_.extra_headers.MergeFrom(proxy_delegate_headers_);
+  if (is_udp_tunnel_) {
+    // This protocol header is mandatory and cannot be overridden by user
+    // supplied extra headers.
+    request_.extra_headers.SetHeader("capsule-protocol", "?1");
+  }
   return result;
 }
 
 int QuicProxyClientSocket::DoSendRequest() {
+  if (is_udp_tunnel_) {
+    int support = stream_->CheckConnectUdpSupport();
+    if (support == ERR_IO_PENDING) {
+      // SETTINGS travel on a separate stream and can arrive after the QUIC
+      // handshake. The enclosing ConnectJob bounds the complete setup time.
+      next_state_ = STATE_SEND_REQUEST;
+      base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
+          FROM_HERE,
+          base::BindOnce(&QuicProxyClientSocket::OnIOComplete,
+                         weak_factory_.GetWeakPtr(), OK),
+          base::Milliseconds(10));
+      return ERR_IO_PENDING;
+    }
+    if (support != OK) {
+      return support;
+    }
+  }
   next_state_ = STATE_SEND_REQUEST_COMPLETE;
 
   std::string request_line;
@@ -465,8 +525,14 @@ int QuicProxyClientSocket::DoSendRequest() {
                        request_line, &request_.extra_headers);
 
   quiche::HttpHeaderBlock headers;
-  CreateSpdyHeadersFromHttpRequest(request_, std::nullopt,
-                                   request_.extra_headers, &headers);
+  if (is_udp_tunnel_) {
+    CreateSpdyHeadersFromHttpRequestForExtendedConnect(
+        request_, std::nullopt, "connect-udp", request_.extra_headers,
+        &headers);
+  } else {
+    CreateSpdyHeadersFromHttpRequest(request_, std::nullopt,
+                                     request_.extra_headers, &headers);
+  }
 
   if (preamble_index_.has_value()) {
     return stream_->WriteHeaders(std::move(headers), true, nullptr);
@@ -536,7 +602,10 @@ int QuicProxyClientSocket::DoProcessResponseHeaders() {
       return OK;
     }
     return proxy_delegate_->OnTunnelHeadersReceived(
-        proxy_chain_, proxy_chain_index_, *response_.headers,
+        proxy_chain_, proxy_chain_index_,
+        is_udp_tunnel_ ? ProxyTunnelType::kConnectUdp
+                       : ProxyTunnelType::kConnect,
+        *response_.headers,
         base::BindOnce(&QuicProxyClientSocket::OnIOComplete,
                        weak_factory_.GetWeakPtr()));
   }
@@ -560,17 +629,41 @@ int QuicProxyClientSocket::DoProcessResponseCode() {
     next_state_ = STATE_CONNECT_COMPLETE;
     return OK;
   }
-  switch (response_.headers->response_code()) {
-    case 200:  // OK
-      next_state_ = STATE_CONNECT_COMPLETE;
-      return OK;
+  int response_code = response_.headers->response_code();
+  if ((!is_udp_tunnel_ && response_code == 200) ||
+      (is_udp_tunnel_ && IsSuccessfulConnectUdpResponse(*response_.headers))) {
+    if (is_udp_tunnel_) {
+      // Receipt of a successful response alone must not enable a reliable
+      // fallback. The peer must negotiate HTTP/3 DATAGRAM support.
+      if (!stream_->SupportsH3Datagram()) {
+        return ERR_NOT_IMPLEMENTED;
+      }
+      stream_->RegisterHttp3DatagramVisitor(this);
+      udp_visitor_registered_ = true;
+      udp_control_buffer_ = base::MakeRefCounted<IOBufferWithSize>(1024);
+      int rv = stream_->ReadBody(
+          udp_control_buffer_.get(), 1024,
+          base::BindOnce(&QuicProxyClientSocket::OnUdpControlRead,
+                         weak_factory_.GetWeakPtr()));
+      if (rv != ERR_IO_PENDING) {
+        base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
+            FROM_HERE, base::BindOnce(&QuicProxyClientSocket::OnUdpControlRead,
+                                      weak_factory_.GetWeakPtr(), rv));
+      }
+    }
+    next_state_ = STATE_CONNECT_COMPLETE;
+    return OK;
+  }
 
+  switch (response_code) {
     case 407:  // Proxy Authentication Required
       next_state_ = STATE_CONNECT_COMPLETE;
       SanitizeProxyAuth(response_);
       return HandleProxyAuthChallenge(auth_.get(), &response_, net_log_);
 
     default:
+      DLOG_IF(WARNING, is_udp_tunnel_)
+          << "CONNECT-UDP proxy returned status " << response_code;
       // Ignore response to avoid letting the proxy impersonate the target
       // server.  (See http://crbug.com/137891.)
       return ERR_TUNNEL_CONNECTION_FAILED;
@@ -617,5 +710,105 @@ void QuicProxyClientSocket::OnBeforeTunnelRequestComplete(
     OnIOComplete(result.error());
   }
 }
+
+int QuicProxyClientSocket::ReadUdp(IOBuffer* buf,
+                                   int buf_len,
+                                   CompletionOnceCallback callback) {
+  if (udp_error_ != OK) {
+    return udp_error_;
+  }
+  if (!IsConnected()) {
+    return ERR_CONNECTION_CLOSED;
+  }
+  if (buf_len <= 0) {
+    return ERR_INVALID_ARGUMENT;
+  }
+  if (!udp_datagrams_.empty()) {
+    std::string packet = std::move(udp_datagrams_.front());
+    udp_datagrams_.pop();
+    udp_queue_bytes_ -= packet.size();
+    if (packet.size() > static_cast<size_t>(buf_len)) {
+      return ERR_MSG_TOO_BIG;
+    }
+    buf->span().copy_prefix_from(base::as_byte_span(packet));
+    return packet.size();
+  }
+  CHECK(!read_callback_);
+  read_buf_ = buf;
+  udp_read_buf_len_ = buf_len;
+  read_callback_ = std::move(callback);
+  return ERR_IO_PENDING;
+}
+
+int QuicProxyClientSocket::WriteUdp(IOBuffer* buf, int buf_len) {
+  if (udp_error_ != OK) {
+    return udp_error_;
+  }
+  if (!IsConnected()) {
+    return ERR_CONNECTION_CLOSED;
+  }
+  if (buf_len < 0) {
+    return ERR_INVALID_ARGUMENT;
+  }
+  // The stream handle reports the QUIC DATAGRAM budget, before HTTP's
+  // quarter stream ID and CONNECT-UDP's one-byte context. Reserve the
+  // maximum varint size to remain safe as stream IDs grow.
+  const size_t budget = stream_->GetGuaranteedLargestMessagePayload();
+  if (buf_len > 65527 || budget <= 9 ||
+      static_cast<size_t>(buf_len) > budget - 9) {
+    return ERR_MSG_TOO_BIG;
+  }
+  int rv =
+      stream_->WriteConnectUdpPayload(std::string_view(buf->data(), buf_len));
+  return rv == OK ? buf_len : rv;
+}
+
+void QuicProxyClientSocket::CompleteUdpRead(int result) {
+  read_buf_ = nullptr;
+  udp_read_buf_len_ = 0;
+  if (read_callback_) {
+    std::move(read_callback_).Run(result);
+  }
+}
+
+void QuicProxyClientSocket::OnUdpControlRead(int result) {
+  // QUICHE consumes capsules through the registered visitor. This read
+  // watches FIN/RESET/connection loss and completes a pending datagram read.
+  udp_error_ = result < 0 ? result : ERR_CONNECTION_CLOSED;
+  CompleteUdpRead(udp_error_);
+}
+
+void QuicProxyClientSocket::OnHttp3Datagram(quic::QuicStreamId stream_id,
+                                            std::string_view payload) {
+  quic::QuicDataReader reader(payload);
+  uint64_t context = 0;
+  if (!reader.ReadVarInt62(&context) || context != 0) {
+    return;
+  }
+  payload = reader.ReadRemainingPayload();
+  if (payload.size() > 65527) {
+    stream_->Reset(quic::QUIC_BAD_APPLICATION_PAYLOAD);
+    return;
+  }
+  if (read_callback_) {
+    int result = ERR_MSG_TOO_BIG;
+    if (payload.size() <= static_cast<size_t>(udp_read_buf_len_)) {
+      read_buf_->span().copy_prefix_from(base::as_byte_span(payload));
+      result = payload.size();
+    }
+    CompleteUdpRead(result);
+    return;
+  }
+  if (udp_datagrams_.size() >= 32 ||
+      udp_queue_bytes_ + payload.size() > 65536) {
+    return;
+  }
+  udp_queue_bytes_ += payload.size();
+  udp_datagrams_.emplace(payload);
+}
+
+void QuicProxyClientSocket::OnUnknownCapsule(
+    quic::QuicStreamId stream_id,
+    const quiche::UnknownCapsule& capsule) {}
 
 }  // namespace net

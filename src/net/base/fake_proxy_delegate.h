@@ -41,12 +41,13 @@ class FakeProxyDelegate : public ProxyDelegate {
   base::expected<HttpRequestHeaders, Error> OnBeforeTunnelRequest(
       const ProxyChain& proxy_chain,
       size_t proxy_index,
+      ProxyTunnelType tunnel_type,
       OnBeforeTunnelRequestCallback callback) override;
-  Error OnTunnelHeadersReceived(
-      const ProxyChain& proxy_chain,
-      size_t proxy_index,
-      const HttpResponseHeaders& response_headers,
-      CompletionOnceCallback callback) override;
+  Error OnTunnelHeadersReceived(const ProxyChain& proxy_chain,
+                                size_t proxy_index,
+                                ProxyTunnelType tunnel_type,
+                                const HttpResponseHeaders& response_headers,
+                                CompletionOnceCallback callback) override;
   void SetProxyResolutionService(
       ProxyResolutionService* proxy_resolution_service) override;
 

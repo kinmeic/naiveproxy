@@ -8,6 +8,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "base/memory/raw_ptr.h"
@@ -132,7 +133,9 @@ class NET_EXPORT ClientSocketPool : public LowerLayeredPool {
             NetworkAnonymizationKey network_anonymization_key,
             SecureDnsPolicy secure_dns_policy,
             bool disable_cert_network_fetches,
-            handles::NetworkHandle target_network);
+            handles::NetworkHandle target_network,
+            bool is_udp_tunnel = false,
+            std::string_view udp_tunnel_uri_template = {});
     GroupId(const GroupId& group_id);
 
     ~GroupId();
@@ -155,6 +158,10 @@ class NET_EXPORT ClientSocketPool : public LowerLayeredPool {
     }
 
     handles::NetworkHandle target_network() const { return target_network_; }
+    bool is_udp_tunnel() const { return is_udp_tunnel_; }
+    const std::string& udp_tunnel_uri_template() const {
+      return udp_tunnel_uri_template_;
+    }
 
     // Returns the group ID as a string, for logging.
     std::string ToString() const;
@@ -182,6 +189,9 @@ class NET_EXPORT ClientSocketPool : public LowerLayeredPool {
     bool disable_cert_network_fetches_;
 
     handles::NetworkHandle target_network_ = handles::kInvalidNetworkHandle;
+
+    bool is_udp_tunnel_ = false;
+    std::string udp_tunnel_uri_template_;
   };
 
   // Parameters that, in combination with GroupId, proxy, websocket information,

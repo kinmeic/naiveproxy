@@ -58,7 +58,7 @@ Options:
   --proxy=PROXY
 
     PROXY = PROXY-CHAIN | SOCKS-PROXY
-    PROXY-CHAIN = <PROXY-URI>[","<PROXY-CHAIN>] 
+    PROXY-CHAIN = <PROXY-URI>[","<PROXY-CHAIN>]
     PROXY-URI = <PROXY-PROTO>"://"[<USER>":"<PASS>"@"]<HOSTNAME>[":"<PORT>]
     PROXY-PROTO = "http" | "https" | "quic"
     SOCKS-PROXY = "socks://"<HOSTNAME>[":"<PORT>]
@@ -107,6 +107,62 @@ Options:
     Appends extra headers in requests to the proxy server.
     Multiple headers are separated by CRLF.
 
+  --masque-udp=<true|false>
+
+    Enables SOCKS5 UDP ASSOCIATE over CONNECT-UDP using
+    a single quic:// (HTTP/3 DATAGRAM) proxy. Default: false.
+
+  --masque-udp-path-template=<PATH_TEMPLATE>
+
+    Overrides the CONNECT-UDP request path template. The template must begin
+    with "/" and contain both {target_host} and {target_port}.
+
+  --connect-udp-timeout=<SECONDS>
+
+    Removes a CONNECT-UDP target flow after this many seconds without an
+    admitted client datagram or an upstream datagram. Each UDP association
+    schedules cleanup for its earliest flow deadline. Default: 120.
+
+  --socks-udp-association-timeout=<SECONDS>
+
+    Immediately closes a SOCKS5 UDP association after this many seconds without
+    valid control activity, accepted client UDP traffic, or upstream UDP
+    traffic. All owned CONNECT-UDP streams are reset. Default: 300.
+
+  --udp-max-target-flows=<N>
+
+    Maximum target endpoints per SOCKS5 UDP association. Each target consumes
+    one upstream HTTP stream. This limit is independent of Chromium's
+    MaxConnectionsPerProxy policy because naive's upstream requests explicitly
+    ignore socket-pool limits. CONNECT and CONNECT-UDP streams use Chromium's
+    common proxy-tunnel scheduler without reserving capacity for either type.
+    When this limit is reached, datagrams for new targets are discarded rather
+    than displacing established flows. Default: 128.
+
+  --udp-max-queued-datagrams-per-flow=<N>
+
+    Maximum datagrams waiting for one CONNECT-UDP target flow. Default: 16.
+
+  --udp-max-queued-bytes-per-flow=<N>
+
+    Maximum payload bytes waiting for one CONNECT-UDP target flow.
+    Default: 262144.
+
+  --udp-max-queued-sends=<N>
+
+    Maximum response datagrams waiting to be sent to the SOCKS5 client.
+    Default: 64.
+
+  --udp-max-queued-send-bytes=<N>
+
+    Maximum response bytes waiting to be sent to the SOCKS5 client.
+    Default: 1048576.
+
+    When a queue reaches either of its limits, naive discards the oldest
+    waiting datagrams to bound latency and retain newer QUIC recovery traffic.
+    A value of zero disables any of the five UDP limits. Limits apply per
+    SOCKS5 UDP association; flow queue limits apply separately per target.
+
   --host-resolver-rules="MAP proxy.example.com 1.2.3.4"
 
     Statically resolves a domain name to an IP address.
@@ -132,3 +188,8 @@ Options:
   --no-post-quantum
 
     Overrides the default and disables post-quantum key agreement.
+
+  --trusted-cert=<PATH>
+
+    Adds a PEM CA bundle to this process's trusted roots. Certificate names,
+    signatures and validity are still verified. Does not modify system trust.

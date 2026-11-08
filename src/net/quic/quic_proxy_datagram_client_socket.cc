@@ -421,7 +421,7 @@ int QuicProxyDatagramClientSocket::DoCalculateHeaders() {
     ASSIGN_OR_RETURN(
         proxy_delegate_headers_,
         proxy_delegate_->OnBeforeTunnelRequest(
-            proxy_chain_, proxy_chain_index(),
+            proxy_chain_, proxy_chain_index(), ProxyTunnelType::kConnectUdp,
             base::BindOnce(
                 &QuicProxyDatagramClientSocket::OnBeforeTunnelRequestComplete,
                 weak_factory_.GetWeakPtr())),
@@ -555,7 +555,8 @@ int QuicProxyDatagramClientSocket::DoProcessResponseHeaders() {
   // TODO(crbug.com/326437102): Add case for Proxy Authentication.
   if (proxy_delegate_) {
     return proxy_delegate_->OnTunnelHeadersReceived(
-        proxy_chain(), proxy_chain_index(), *response_.headers,
+        proxy_chain(), proxy_chain_index(), ProxyTunnelType::kConnectUdp,
+        *response_.headers,
         base::BindOnce(&QuicProxyDatagramClientSocket::OnIOComplete,
                        weak_factory_.GetWeakPtr()));
   }

@@ -23,6 +23,11 @@ class GURL;
 
 namespace net {
 
+// Identifies the protocol carried by a proxy tunnel request. Delegates can use
+// this to avoid applying protocol-specific headers or response handling to a
+// different kind of tunnel.
+enum class ProxyTunnelType { kConnect, kConnectUdp };
+
 class HttpRequestHeaders;
 class HttpResponseHeaders;
 class ProxyInfo;
@@ -90,22 +95,25 @@ class NET_EXPORT ProxyDelegate {
   // return value of this function. With the exception that ERR_IO_PENDING is
   // no longer an acceptable error code.
   // `proxy_index` identifies the proxy, within `proxy_chain`, to whom we will
-  // be sending the extra headers`.
+  // be sending the extra headers. `tunnel_type` identifies the kind of tunnel
+  // being established.
   virtual base::expected<HttpRequestHeaders, Error> OnBeforeTunnelRequest(
       const ProxyChain& proxy_chain,
       size_t proxy_index,
+      ProxyTunnelType tunnel_type,
       OnBeforeTunnelRequestCallback callback) = 0;
 
   // Called when the response headers for the proxy tunnel request have been
   // received. Allows the delegate to override the net error code of the tunnel
   // request. Returning OK causes the standard tunnel response handling to be
   // performed. `proxy_index` identifies the proxy, within `proxy_chain`, that
-  // we're receiving response headers from. Implementations should make sure
-  // they can trust said proxy before making decisions based on
-  // `response_headers`.
+  // we're receiving response headers from, and `tunnel_type` identifies the
+  // kind of tunnel. Implementations should make sure they can trust said proxy
+  // before making decisions based on `response_headers`.
   virtual Error OnTunnelHeadersReceived(
       const ProxyChain& proxy_chain,
       size_t proxy_index,
+      ProxyTunnelType tunnel_type,
       const HttpResponseHeaders& response_headers,
       CompletionOnceCallback callback) = 0;
 

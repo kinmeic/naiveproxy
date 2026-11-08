@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <memory>
 #include <optional>
+#include <string_view>
 #include <utility>
 #include <variant>
 
@@ -157,7 +158,9 @@ HttpProxySocketParams::HttpProxySocketParams(
     const NetworkTrafficAnnotationTag traffic_annotation,
     const NetworkAnonymizationKey& network_anonymization_key,
     SecureDnsPolicy secure_dns_policy,
-    handles::NetworkHandle target_network)
+    handles::NetworkHandle target_network,
+    bool is_udp_tunnel,
+    std::string_view udp_tunnel_uri_template)
     : HttpProxySocketParams(std::move(nested_params),
                             std::nullopt,
                             endpoint,
@@ -167,7 +170,9 @@ HttpProxySocketParams::HttpProxySocketParams(
                             std::move(traffic_annotation),
                             network_anonymization_key,
                             secure_dns_policy,
-                            target_network) {}
+                            target_network,
+                            is_udp_tunnel,
+                            udp_tunnel_uri_template) {}
 
 HttpProxySocketParams::HttpProxySocketParams(
     SSLConfig quic_ssl_config,
@@ -178,7 +183,9 @@ HttpProxySocketParams::HttpProxySocketParams(
     const NetworkTrafficAnnotationTag traffic_annotation,
     const NetworkAnonymizationKey& network_anonymization_key,
     SecureDnsPolicy secure_dns_policy,
-    handles::NetworkHandle target_network)
+    handles::NetworkHandle target_network,
+    bool is_udp_tunnel,
+    std::string_view udp_tunnel_uri_template)
     : HttpProxySocketParams(std::nullopt,
                             std::move(quic_ssl_config),
                             endpoint,
@@ -188,7 +195,9 @@ HttpProxySocketParams::HttpProxySocketParams(
                             std::move(traffic_annotation),
                             network_anonymization_key,
                             secure_dns_policy,
-                            target_network) {}
+                            target_network,
+                            is_udp_tunnel,
+                            udp_tunnel_uri_template) {}
 
 HttpProxySocketParams::HttpProxySocketParams(
     std::optional<ConnectJobParams> nested_params,
@@ -200,13 +209,17 @@ HttpProxySocketParams::HttpProxySocketParams(
     const NetworkTrafficAnnotationTag traffic_annotation,
     const NetworkAnonymizationKey& network_anonymization_key,
     SecureDnsPolicy secure_dns_policy,
-    handles::NetworkHandle target_network)
+    handles::NetworkHandle target_network,
+    bool is_udp_tunnel,
+    std::string_view udp_tunnel_uri_template)
     : nested_params_(std::move(nested_params)),
       quic_ssl_config_(std::move(quic_ssl_config)),
       endpoint_(endpoint),
       proxy_chain_(proxy_chain),
       proxy_chain_index_(proxy_chain_index),
       tunnel_(tunnel),
+      is_udp_tunnel_(is_udp_tunnel),
+      udp_tunnel_uri_template_(udp_tunnel_uri_template),
       network_anonymization_key_(network_anonymization_key),
       traffic_annotation_(traffic_annotation),
       secure_dns_policy_(secure_dns_policy),
@@ -626,6 +639,9 @@ int HttpProxyConnectJob::DoTransportConnectComplete(int result) {
 
 int HttpProxyConnectJob::DoHttpProxyConnect() {
   DCHECK(params_->tunnel());
+  if (params_->is_udp_tunnel()) {
+    return ERR_TUNNEL_CONNECTION_FAILED;
+  }
   next_state_ = STATE_HTTP_PROXY_CONNECT_COMPLETE;
 
   // Reset the timer to just the length of time allowed for HttpProxy handshake
@@ -718,6 +734,9 @@ int HttpProxyConnectJob::DoSpdyProxyCreateStream() {
 }
 
 int HttpProxyConnectJob::DoSpdyProxyCreateStreamComplete(int result) {
+  if (params_->is_udp_tunnel()) {
+    return ERR_NOT_IMPLEMENTED;
+  }
   if (result < 0) {
     // See the comment in DoHttpProxyConnectComplete(). HTTP/2 proxies will
     // typically also fail here, as a result of SpdyProxyClientSocket::Connect()
@@ -739,7 +758,8 @@ int HttpProxyConnectJob::DoSpdyProxyCreateStreamComplete(int result) {
   transport_socket_ = std::make_unique<SpdyProxyClientSocket>(
       stream, params_->proxy_chain(), params_->proxy_chain_index(),
       GetUserAgent(), params_->endpoint(), net_log(), http_auth_controller_,
-      common_connect_job_params()->proxy_delegate);
+      common_connect_job_params()->proxy_delegate, params_->is_udp_tunnel(),
+      params_->udp_tunnel_uri_template());
   return transport_socket_->Connect(base::BindOnce(
       &HttpProxyConnectJob::OnIOComplete, base::Unretained(this)));
 }
@@ -803,7 +823,7 @@ int HttpProxyConnectJob::DoQuicProxyCreateStream(int result) {
   quic_session_request_.reset();
 
   return quic_session_->RequestStream(
-      false,
+      params_->is_udp_tunnel(),
       base::BindOnce(&HttpProxyConnectJob::OnIOComplete,
                      base::Unretained(this)),
       params_->traffic_annotation());
@@ -826,7 +846,8 @@ int HttpProxyConnectJob::DoQuicProxyCreateStreamComplete(int result) {
       std::move(quic_stream), std::move(quic_session_), params_->proxy_chain(),
       params_->proxy_chain_index(), GetUserAgent(), params_->endpoint(),
       net_log(), http_auth_controller_,
-      common_connect_job_params()->proxy_delegate);
+      common_connect_job_params()->proxy_delegate, params_->is_udp_tunnel(),
+      params_->udp_tunnel_uri_template());
   return transport_socket_->Connect(base::BindOnce(
       &HttpProxyConnectJob::OnIOComplete, base::Unretained(this)));
 }

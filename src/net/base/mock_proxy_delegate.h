@@ -55,12 +55,14 @@ class MockProxyDelegate : public ProxyDelegate {
               OnBeforeTunnelRequest,
               (const ProxyChain& proxy_chain,
                size_t proxy_index,
+               ProxyTunnelType tunnel_type,
                OnBeforeTunnelRequestCallback callback),
               (override));
   MOCK_METHOD(Error,
               OnTunnelHeadersReceived,
               (const ProxyChain& proxy_chain,
                size_t proxy_index,
+               ProxyTunnelType tunnel_type,
                const HttpResponseHeaders& response_headers,
                CompletionOnceCallback callback),
               (override));

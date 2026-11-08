@@ -7,6 +7,7 @@
 #include <array>
 #include <memory>
 #include <optional>
+#include <string_view>
 #include <utility>
 
 #include "base/check_op.h"
@@ -97,7 +98,9 @@ int InitSocketPoolHelper(
     HttpNetworkSession::SocketPoolType socket_pool_type,
     CompletionOnceCallback callback,
     const ClientSocketPool::ProxyAuthCallback& proxy_auth_callback,
-    ClientSocketPool::PreconnectCompletionCallback preconnect_callback) {
+    ClientSocketPool::PreconnectCompletionCallback preconnect_callback,
+    bool is_udp,
+    std::string_view udp_tunnel_uri_template) {
   DCHECK(endpoint.IsValid());
 
   session->ApplyTestingFixedPort(endpoint);
@@ -106,7 +109,8 @@ int InitSocketPoolHelper(
       !!(request_load_flags & LOAD_DISABLE_CERT_NETWORK_FETCHES);
   ClientSocketPool::GroupId connection_group(
       std::move(endpoint), privacy_mode, std::move(network_anonymization_key),
-      secure_dns_policy, disable_cert_network_fetches, target_network);
+      secure_dns_policy, disable_cert_network_fetches, target_network, is_udp,
+      udp_tunnel_uri_template);
   scoped_refptr<ClientSocketPool::SocketParams> socket_params =
       CreateSocketParams(connection_group, allowed_bad_certs);
 
@@ -224,7 +228,9 @@ int NET_EXPORT InitSocketHandleForHttpRequest(
     const NetLogWithSource& net_log,
     ClientSocketHandle* socket_handle,
     CompletionOnceCallback callback,
-    const ClientSocketPool::ProxyAuthCallback& proxy_auth_callback) {
+    const ClientSocketPool::ProxyAuthCallback& proxy_auth_callback,
+    bool is_udp,
+    std::string_view udp_tunnel_uri_template) {
   DCHECK(socket_handle);
   return InitSocketPoolHelper(
       std::move(endpoint), request_load_flags, request_priority, session,
@@ -232,7 +238,8 @@ int NET_EXPORT InitSocketHandleForHttpRequest(
       std::move(network_anonymization_key), secure_dns_policy, socket_tag,
       target_network, net_log, 0, socket_handle,
       HttpNetworkSession::SocketPoolType::kNormal, std::move(callback),
-      proxy_auth_callback, ClientSocketPool::PreconnectCompletionCallback());
+      proxy_auth_callback, ClientSocketPool::PreconnectCompletionCallback(),
+      is_udp, udp_tunnel_uri_template);
 }
 
 int InitSocketHandleForWebSocketRequest(
@@ -265,7 +272,8 @@ int InitSocketHandleForWebSocketRequest(
       std::move(network_anonymization_key), SecureDnsPolicy::kAllow,
       SocketTag(), target_network, net_log, 0, socket_handle,
       HttpNetworkSession::SocketPoolType::kWebSocket, std::move(callback),
-      proxy_auth_callback, ClientSocketPool::PreconnectCompletionCallback());
+      proxy_auth_callback, ClientSocketPool::PreconnectCompletionCallback(),
+      false, {});
 }
 
 int PreconnectSocketsForHttpRequest(
@@ -293,7 +301,7 @@ int PreconnectSocketsForHttpRequest(
       std::move(network_anonymization_key), secure_dns_policy, SocketTag(),
       target_network, net_log, num_preconnect_streams, nullptr,
       HttpNetworkSession::SocketPoolType::kNormal, CompletionOnceCallback(),
-      ClientSocketPool::ProxyAuthCallback(), std::move(callback));
+      ClientSocketPool::ProxyAuthCallback(), std::move(callback), false, {});
 }
 
 }  // namespace net

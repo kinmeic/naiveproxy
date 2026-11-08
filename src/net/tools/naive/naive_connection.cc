@@ -9,7 +9,7 @@
 
 #include "net/tools/naive/naive_connection.h"
 
-#include <cstring>
+#include <string_view>
 #include <utility>
 
 #include "base/functional/bind.h"
@@ -53,7 +53,6 @@ constexpr int kBufferSize = 64 * 1024;
 }  // namespace
 
 NaiveConnection::NaiveConnection(
-    unsigned int id,
     ClientProtocol protocol,
     std::unique_ptr<PaddingType> negotiated_client_padding,
     const ProxyInfo& proxy_info,
@@ -62,9 +61,10 @@ NaiveConnection::NaiveConnection(
     const NetworkAnonymizationKey& network_anonymization_key,
     const NetLogWithSource& net_log,
     std::unique_ptr<StreamSocket> accepted_socket,
-    const NetworkTrafficAnnotationTag& traffic_annotation)
-    : id_(id),
-      protocol_(protocol),
+    const NetworkTrafficAnnotationTag& traffic_annotation,
+    std::optional<HostPortPair> datagram_target,
+    std::string masque_udp_path_template)
+    : protocol_(protocol),
       negotiated_client_padding_(std::move(negotiated_client_padding)),
       proxy_info_(proxy_info),
       resolver_(resolver),
@@ -74,6 +74,8 @@ NaiveConnection::NaiveConnection(
       next_state_(STATE_NONE),
       client_socket_(std::move(accepted_socket)),
       server_socket_handle_(std::make_unique<ClientSocketHandle>()),
+      datagram_target_(std::move(datagram_target)),
+      masque_udp_path_template_(std::move(masque_udp_path_template)),
       sockets_{nullptr, nullptr},
       errors_{OK, OK},
       write_pending_{false, false},
@@ -91,16 +93,27 @@ NaiveConnection::~NaiveConnection() {
   Disconnect();
 }
 
-int NaiveConnection::Connect(CompletionOnceCallback callback) {
+int NaiveConnection::ConnectClient(CompletionOnceCallback callback) {
   DCHECK(client_socket_);
+  DCHECK(!is_datagram());
   DCHECK_EQ(next_state_, STATE_NONE);
   DCHECK(!connect_callback_);
-
-  if (full_duplex_) {
-    return OK;
-  }
-
   next_state_ = STATE_CONNECT_CLIENT;
+
+  int rv = DoLoop(OK);
+  if (rv == ERR_IO_PENDING) {
+    connect_callback_ = std::move(callback);
+  }
+  return rv;
+}
+
+int NaiveConnection::ConnectServer(CompletionOnceCallback callback) {
+  DCHECK(id_.has_value());
+  DCHECK(is_datagram() || client_socket_);
+  DCHECK_EQ(next_state_, STATE_NONE);
+  DCHECK(!connect_callback_);
+  DCHECK(!full_duplex_);
+  next_state_ = STATE_CONNECT_SERVER;
 
   int rv = DoLoop(OK);
   if (rv == ERR_IO_PENDING) {
@@ -121,7 +134,9 @@ void NaiveConnection::Disconnect() {
   if (server_socket_handle_->socket()) {
     server_socket_handle_->socket()->Disconnect();
   }
-  client_socket_->Disconnect();
+  if (client_socket_) {
+    client_socket_->Disconnect();
+  }
 
   next_state_ = STATE_NONE;
   OnBothDisconnected();
@@ -189,6 +204,12 @@ int NaiveConnection::DoConnectClientComplete(int result) {
     return result;
   }
 
+  if (is_socks_udp_associate()) {
+    full_duplex_ = true;
+    next_state_ = STATE_NONE;
+    return OK;
+  }
+
   sockets_[kClient] = std::make_unique<NaivePaddingSocket>(
       client_socket_.get(), *negotiated_client_padding_, kClient);
 
@@ -199,7 +220,6 @@ int NaiveConnection::DoConnectClientComplete(int result) {
   if (!GetServerPaddingType().has_value()) {
     early_pull_pending_ = false;
     early_pull_result_ = 0;
-    next_state_ = STATE_CONNECT_SERVER;
     return OK;
   }
 
@@ -212,15 +232,17 @@ int NaiveConnection::DoConnectClientComplete(int result) {
     }
   }
 
-  next_state_ = STATE_CONNECT_SERVER;
   return OK;
 }
 
 int NaiveConnection::DoConnectServer() {
   next_state_ = STATE_CONNECT_SERVER_COMPLETE;
+  const char* log_prefix = is_datagram() ? "CONNECT-UDP " : "Connection ";
 
   HostPortPair origin;
-  if (protocol_ == ClientProtocol::kSocks5) {
+  if (is_datagram()) {
+    origin = *datagram_target_;
+  } else if (protocol_ == ClientProtocol::kSocks5) {
     const auto* socket =
         static_cast<const Socks5ServerSocket*>(client_socket_.get());
     origin = socket->request_endpoint();
@@ -236,7 +258,7 @@ int NaiveConnection::DoConnectServer() {
     int rv;
     rv = socket->GetPeerAddress(&peer_endpoint);
     if (rv != OK) {
-      LOG(ERROR) << "Connection " << id_
+      LOG(ERROR) << log_prefix << id()
                  << " cannot get peer address: " << ErrorToShortString(rv);
       return rv;
     }
@@ -258,7 +280,7 @@ int NaiveConnection::DoConnectServer() {
         } else if (!resolver_->IsInResolvedRange(addr)) {
           origin = HostPortPair::FromIPEndPoint(ipe);
         } else {
-          LOG(ERROR) << "Connection " << id_ << " to unresolved name for "
+          LOG(ERROR) << log_prefix << id() << " to unresolved name for "
                      << addr.ToString();
           return ERR_ADDRESS_INVALID;
         }
@@ -277,12 +299,12 @@ int NaiveConnection::DoConnectServer() {
       "http", CanonicalizeHost(origin.HostForURL(), &host_info), origin.port(),
       url::SchemeHostPort::ALREADY_CANONICALIZED);
   if (!endpoint.IsValid()) {
-    LOG(ERROR) << "Connection " << id_ << " to invalid origin "
+    LOG(ERROR) << log_prefix << id() << " to invalid origin "
                << origin.ToString();
     return ERR_ADDRESS_INVALID;
   }
 
-  LOG(INFO) << "Connection " << id_ << " to " << origin.ToString() << " via "
+  LOG(INFO) << log_prefix << id() << " to " << origin.ToString() << " via "
             << proxy_info_.ToDebugString();
 
   // Ignores socket limit set by socket pool for this type of socket.
@@ -291,12 +313,20 @@ int NaiveConnection::DoConnectServer() {
       proxy_info_, {}, PRIVACY_MODE_DISABLED, network_anonymization_key_,
       SecureDnsPolicy::kDisable, SocketTag(), handles::kInvalidNetworkHandle,
       net_log_, server_socket_handle_.get(), io_callback_,
-      ClientSocketPool::ProxyAuthCallback());
+      ClientSocketPool::ProxyAuthCallback(), is_datagram(),
+      is_datagram() ? std::string_view(masque_udp_path_template_)
+                    : std::string_view());
 }
 
 int NaiveConnection::DoConnectServerComplete(int result) {
   if (result < 0) {
     return result;
+  }
+
+  if (is_datagram()) {
+    full_duplex_ = true;
+    next_state_ = STATE_NONE;
+    return OK;
   }
 
   std::optional<PaddingType> server_padding_type = GetServerPaddingType();
@@ -496,6 +526,44 @@ void NaiveConnection::OnPushComplete(Direction from, Direction to, int result) {
   } else {
     Pull(from, to);
   }
+}
+
+int NaiveConnection::ReadDatagramFromServer(IOBuffer* buf,
+                                            int buf_len,
+                                            CompletionOnceCallback callback) {
+  DCHECK(is_datagram());
+  if (!is_datagram() || !server_socket_handle_->socket()) {
+    return ERR_SOCKET_NOT_CONNECTED;
+  }
+  return server_socket_handle_->socket()->Read(buf, buf_len,
+                                               std::move(callback));
+}
+
+int NaiveConnection::WriteDatagramToServer(IOBuffer* buf,
+                                           int buf_len,
+                                           CompletionOnceCallback callback) {
+  DCHECK(is_datagram());
+  if (!is_datagram() || !server_socket_handle_->socket()) {
+    return ERR_SOCKET_NOT_CONNECTED;
+  }
+
+  return server_socket_handle_->socket()->Write(
+      buf, buf_len, std::move(callback), traffic_annotation_);
+}
+
+bool NaiveConnection::is_socks_udp_associate() const {
+  if (protocol_ != ClientProtocol::kSocks5 || !client_socket_) {
+    return false;
+  }
+  const auto* socket =
+      static_cast<const Socks5ServerSocket*>(client_socket_.get());
+  return socket->command() == Socks5ServerSocket::Command::kUdpAssociate;
+}
+
+std::unique_ptr<StreamSocket> NaiveConnection::ReleaseClientSocket() {
+  DCHECK(is_socks_udp_associate());
+  sockets_[kClient] = nullptr;
+  return std::move(client_socket_);
 }
 
 std::optional<PaddingType> NaiveConnection::GetServerPaddingType() const {

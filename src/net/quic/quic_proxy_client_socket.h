@@ -7,7 +7,9 @@
 
 #include <cstdio>
 #include <memory>
+#include <queue>
 #include <string>
+#include <string_view>
 
 #include "base/memory/raw_ptr.h"
 #include "base/types/expected.h"
@@ -28,7 +30,9 @@ class ProxyDelegate;
 // QuicProxyClientSocket tunnels a stream socket over an underlying
 // QuicChromiumClientStream. Bytes written to/read from a QuicProxyClientSocket
 // are sent/received via STREAM frames in the underlying QUIC stream.
-class NET_EXPORT_PRIVATE QuicProxyClientSocket : public ProxyClientSocket {
+class NET_EXPORT_PRIVATE QuicProxyClientSocket
+    : public ProxyClientSocket,
+      public quic::QuicSpdyStream::Http3DatagramVisitor {
  public:
   // Create a socket on top of the |stream| by sending a HEADERS CONNECT
   // frame for |endpoint|.  After the response HEADERS frame is received, any
@@ -42,7 +46,9 @@ class NET_EXPORT_PRIVATE QuicProxyClientSocket : public ProxyClientSocket {
       const HostPortPair& endpoint,
       const NetLogWithSource& net_log,
       scoped_refptr<HttpAuthController> auth_controller,
-      ProxyDelegate* proxy_delegate);
+      ProxyDelegate* proxy_delegate,
+      bool is_udp_tunnel = false,
+      std::string_view udp_tunnel_uri_template = {});
 
   QuicProxyClientSocket(const QuicProxyClientSocket&) = delete;
   QuicProxyClientSocket& operator=(const QuicProxyClientSocket&) = delete;
@@ -81,7 +87,22 @@ class NET_EXPORT_PRIVATE QuicProxyClientSocket : public ProxyClientSocket {
   int GetPeerAddress(IPEndPoint* address) const override;
   int GetLocalAddress(IPEndPoint* address) const override;
 
+  void OnHttp3Datagram(quic::QuicStreamId stream_id,
+                       std::string_view payload) override;
+  void OnUnknownCapsule(quic::QuicStreamId stream_id,
+                        const quiche::UnknownCapsule& capsule) override;
+
  private:
+  int ReadUdp(IOBuffer* buf, int buf_len, CompletionOnceCallback callback);
+  int WriteUdp(IOBuffer* buf, int buf_len);
+  void OnUdpControlRead(int result);
+  void CompleteUdpRead(int result);
+  std::queue<std::string> udp_datagrams_;
+  size_t udp_queue_bytes_ = 0;
+  int udp_read_buf_len_ = 0;
+  int udp_error_ = OK;
+  bool udp_visitor_registered_ = false;
+  scoped_refptr<IOBuffer> udp_control_buffer_;
   enum State {
     STATE_DISCONNECTED,
     STATE_GENERATE_AUTH_TOKEN,
@@ -154,6 +175,7 @@ class NET_EXPORT_PRIVATE QuicProxyClientSocket : public ProxyClientSocket {
   // The hostname and port of the endpoint.  This is not necessarily the one
   // specified by the URL, due to Alternate-Protocol or fixed testing ports.
   const HostPortPair endpoint_;
+  const bool is_udp_tunnel_;
   scoped_refptr<HttpAuthController> auth_;
 
   const ProxyChain proxy_chain_;

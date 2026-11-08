@@ -12,6 +12,7 @@
 #include <string>
 
 #include "base/at_exit.h"
+#include "base/base64.h"
 #include "base/check.h"
 #include "base/command_line.h"
 #include "base/feature_list.h"
@@ -244,12 +245,35 @@ std::unique_ptr<URLRequestContext> BuildURLRequestContext(
     builder.set_host_mapping_rules(config.host_resolver_rules);
   }
 
-  builder.SetCertVerifier(
-      CertVerifier::CreateDefault(std::move(cert_net_fetcher)));
+  if (config.trusted_certificates.empty()) {
+    builder.SetCertVerifier(
+        CertVerifier::CreateDefault(std::move(cert_net_fetcher)));
+  } else {
+    auto verifier = CertVerifier::CreateDefaultWithoutCaching(cert_net_fetcher);
+    CertVerifyProc::InstanceParams params;
+    params.additional_trust_anchors_with_enforced_constraints =
+        config.trusted_certificates;
+    verifier->UpdateVerifyProcData(std::move(cert_net_fetcher), {}, params);
+    builder.SetCertVerifier(std::move(verifier));
+  }
 
-  builder.set_proxy_delegate(std::make_unique<NaiveProxyDelegate>(
+  auto delegate = std::make_unique<NaiveProxyDelegate>(
       config.extra_headers,
-      std::vector<PaddingType>{PaddingType::kVariant1, PaddingType::kNone}));
+      std::vector<PaddingType>{PaddingType::kVariant1, PaddingType::kNone});
+  if (proxy_chain_index < static_cast<int>(config.proxy_configs.size())) {
+    for (const auto& [origin, credentials] :
+         config.proxy_configs[proxy_chain_index].auth_store) {
+      // CONNECT-UDP uses explicit preemptive Basic credentials scoped to this
+      // proxy. Do not depend on an HTTP auth cache realm/path match for UDP.
+      delegate->SetUdpAuthorization(
+          ProxyServer::FromSchemeHostAndPort(ProxyServer::SCHEME_QUIC,
+                                             origin.host(), origin.port()),
+          "Basic " + base::Base64Encode(
+                         base::UTF16ToUTF8(credentials.username()) + ":" +
+                         base::UTF16ToUTF8(credentials.password())));
+    }
+  }
+  builder.set_proxy_delegate(std::move(delegate));
 
   if (config.no_post_quantum == true) {
     struct NoPostQuantum : public SSLConfigService {
@@ -421,27 +445,47 @@ int main(int argc, char* argv[]) {
   }
 
   if (config_dict.contains("h") || config_dict.contains("help")) {
-    std::cout << "Usage: naive { OPTIONS | config.json }\n"
-                 "\n"
-                 "Options:\n"
-                 "-h, --help                 Show this message\n"
-                 "--version                  Print version\n"
-                 "--listen=<proto>://[addr][:port] [--listen=...]\n"
-                 "                           proto: socks, http\n"
-                 "                                  redir (Linux only)\n"
-                 "--proxy=<proto>://[<user>:<pass>@]<hostname>[:<port>]\n"
-                 "                           proto: https, quic\n"
-                 "--insecure-concurrency=<N> Use N connections, insecure\n"
-                 "--tunnel-timeout=<SECONDS> Rotate tunnels after timeout\n"
-                 "--idle-timeout=<SECONDS>   Close idle streams after timeout\n"
-                 "--extra-headers=...        Extra headers split by CRLF\n"
-                 "--host-resolver-rules=...  Resolver rules\n"
-                 "--resolver-range=...       Redirect resolver range\n"
-                 "--log[=<path>]             Log to stderr, or file\n"
-                 "--log-net-log=<path>       Save NetLog\n"
-                 "--ssl-key-log-file=<path>  Save SSL keys for Wireshark\n"
-                 "--no-post-quantum          No post-quantum key agreement\n"
-              << std::endl;
+    std::cout
+        << "Usage: naive { OPTIONS | config.json }\n"
+           "\n"
+           "Options:\n"
+           "-h, --help                 Show this message\n"
+           "--version                  Print version\n"
+           "--listen=<proto>://[addr][:port] [--listen=...]\n"
+           "                           proto: socks, http\n"
+           "                                  redir (Linux only)\n"
+           "--proxy=<proto>://[<user>:<pass>@]<hostname>[:<port>]\n"
+           "                           proto: https, quic\n"
+           "--insecure-concurrency=<N> Use N connections, insecure\n"
+           "--tunnel-timeout=<SECONDS> Rotate tunnels after timeout\n"
+           "--idle-timeout=<SECONDS>   Close idle streams after timeout\n"
+           "--extra-headers=...        Extra headers split by CRLF\n"
+           "--masque-udp=<true|false>  Enable SOCKS5 UDP ASSOCIATE via "
+           "CONNECT-UDP\n"
+           "--masque-udp-path-template=<PATH_TEMPLATE>\n"
+           "                           CONNECT-UDP path template\n"
+           "--connect-udp-timeout=<SECONDS>\n"
+           "                           CONNECT-UDP flow idle timeout (120)\n"
+           "--socks-udp-association-timeout=<SECONDS>\n"
+           "                           SOCKS5 UDP association timeout (300)\n"
+           "--udp-max-target-flows=<N> Upstream target streams (128)\n"
+           "--udp-max-queued-datagrams-per-flow=<N>\n"
+           "                           Per-target queued datagrams (16)\n"
+           "--udp-max-queued-bytes-per-flow=<N>\n"
+           "                           Per-target queued bytes (262144)\n"
+           "--udp-max-queued-sends=<N> Local queued responses (64)\n"
+           "--udp-max-queued-send-bytes=<N>\n"
+           "                           Local queued bytes (1048576)\n"
+           "                           Full queues discard oldest; zero\n"
+           "                           disables the corresponding limit\n"
+           "--host-resolver-rules=...  Resolver rules\n"
+           "--resolver-range=...       Redirect resolver range\n"
+           "--log[=<path>]             Log to stderr, or file\n"
+           "--log-net-log=<path>       Save NetLog\n"
+           "--trusted-cert=<path>       Additional trusted CA bundle\n"
+           "--ssl-key-log-file=<path>  Save SSL keys for Wireshark\n"
+           "--no-post-quantum          No post-quantum key agreement\n"
+        << std::endl;
     exit(EXIT_SUCCESS);
   }
 
@@ -559,7 +603,10 @@ int main(int argc, char* argv[]) {
     auto naive_proxy = std::make_unique<net::NaiveProxy>(
         std::move(listen_socket), listen_config.protocol, listen_config.user,
         listen_config.pass, config.insecure_concurrency, config.tunnel_timeout,
-        config.idle_timeout, resolver.get(), session, kTrafficAnnotation,
+        config.idle_timeout, resolver.get(), session, config.masque_udp,
+        config.masque_udp_path_template, config.connect_udp_timeout,
+        config.socks_udp_association_timeout, config.udp_limits,
+        kTrafficAnnotation,
         std::vector<net::PaddingType>{net::PaddingType::kVariant1,
                                       net::PaddingType::kNone});
     naive_proxies.push_back(std::move(naive_proxy));
