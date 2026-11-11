@@ -21,7 +21,6 @@
 #include "base/compiler_specific.h"
 #include "base/containers/span.h"
 #include "base/containers/span_reader.h"
-#include "base/containers/span_rust.h"
 #include "base/containers/span_writer.h"
 #include "base/containers/to_vector.h"
 #include "base/logging.h"
