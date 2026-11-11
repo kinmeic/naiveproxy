@@ -16,7 +16,6 @@
 
 #include "base/android/device_info.h"
 #include "base/command_line.h"
-#include "base/feature_list.h"
 #include "base/logging.h"
 #include "base/no_destructor.h"
 #include "base/strings/strcat.h"
@@ -849,10 +848,9 @@ std::string BuildUnifiedPlatformUserAgentFromProduct(
 
 std::string BuildModelInfo() {
 #if BUILDFLAG(IS_ANDROID)
-  // Model information is not exposed on Android desktop unless
-  // kAndroidDesktopUAModel is enabled.
-  if (!base::FeatureList::IsEnabled(blink::features::kAndroidDesktopUAModel) &&
-      base::android::device_info::is_desktop()) {
+  // The reduced source set omits Blink's Android desktop UA feature. Preserve
+  // its default-disabled behavior for desktop builds.
+  if (base::android::device_info::is_desktop()) {
     return std::string();
   }
 
