@@ -47,15 +47,21 @@
 #include <algorithm>
 #include <string_view>
 
+#if defined(NET_ENABLE_HTTP_CHUNKED_DECODER_RUST)
 #include "base/feature_list.h"
+#endif
 #include "base/logging.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/string_view_util.h"
+#if defined(NET_ENABLE_HTTP_CHUNKED_DECODER_RUST)
 #include "net/base/features.h"
+#endif
 #include "net/base/net_errors.h"
+#if defined(NET_ENABLE_HTTP_CHUNKED_DECODER_RUST)
 #include "net/http/http_chunked_decoder.rs.h"
+#endif
 
 namespace net {
 
@@ -64,17 +70,27 @@ namespace net {
 const size_t HttpChunkedDecoder::kMaxLineBufLen = 16384;
 
 struct HttpChunkedDecoder::Impl {
+#if defined(NET_ENABLE_HTTP_CHUNKED_DECODER_RUST)
   rust::Box<ffi::HttpChunkedDecoder> decoder = ffi::new_http_chunked_decoder();
+#endif
 };
 
+#if defined(NET_ENABLE_HTTP_CHUNKED_DECODER_RUST)
 HttpChunkedDecoder::HttpChunkedDecoder()
     : HttpChunkedDecoder(
           base::FeatureList::IsEnabled(features::kHttpChunkedDecoderInRust)) {}
+#else
+HttpChunkedDecoder::HttpChunkedDecoder() = default;
+#endif
 
 HttpChunkedDecoder::HttpChunkedDecoder(bool use_rust) {
+#if defined(NET_ENABLE_HTTP_CHUNKED_DECODER_RUST)
   if (use_rust) {
     impl_ = std::make_unique<Impl>();
   }
+#else
+  (void)use_rust;
+#endif
 }
 
 HttpChunkedDecoder::~HttpChunkedDecoder() = default;
@@ -84,24 +100,30 @@ HttpChunkedDecoder HttpChunkedDecoder::CreateForTesting(bool use_rust) {
 }
 
 bool HttpChunkedDecoder::reached_eof() const {
+#if defined(NET_ENABLE_HTTP_CHUNKED_DECODER_RUST)
   if (impl_) {
     return impl_->decoder->reached_eof();
   }
+#endif
   return reached_eof_;
 }
 
 int HttpChunkedDecoder::bytes_after_eof() const {
+#if defined(NET_ENABLE_HTTP_CHUNKED_DECODER_RUST)
   if (impl_) {
     return impl_->decoder->bytes_after_eof();
   }
+#endif
   return bytes_after_eof_;
 }
 
 int HttpChunkedDecoder::FilterBuf(base::span<uint8_t> buf) {
+#if defined(NET_ENABLE_HTTP_CHUNKED_DECODER_RUST)
   if (impl_) {
     int result = impl_->decoder->filter_buf(rust::Slice<uint8_t>(buf));
     return result < 0 ? ERR_INVALID_CHUNKED_ENCODING : result;
   }
+#endif
 
   size_t result = 0;
   while (buf.size() > 0) {
