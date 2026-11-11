@@ -1,0 +1,161 @@
+--
+-- Copyright 2024 The Android Open Source Project
+--
+-- Licensed under the Apache License, Version 2.0 (the "License");
+-- you may not use this file except in compliance with the License.
+-- You may obtain a copy of the License at
+--
+--     https://www.apache.org/licenses/LICENSE-2.0
+--
+-- Unless required by applicable law or agreed to in writing, software
+-- distributed under the License is distributed on an "AS IS" BASIS,
+-- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-- See the License for the specific language governing permissions and
+-- limitations under the License.
+
+INCLUDE PERFETTO MODULE wattson.estimates;
+
+INCLUDE PERFETTO MODULE wattson.tasks.attribution;
+
+INCLUDE PERFETTO MODULE wattson.tasks.task_slices;
+
+-- Synthesized swapper gaps (which can span multiple idle exits) clipped to
+-- each deep idle exit they overlap.
+CREATE PERFETTO TABLE _ii_idle_swapper_gaps AS
+INTERVAL INTERSECTION OF (
+  (SELECT ts, dur, cpu FROM _wattson_task_slices WHERE idle_group IS NULL) AS gap,
+  _idle_exits AS idle
+) PER cpu
+|> SELECT ts, dur, cpu, idle.group_id AS idle_group;
+
+-- Tasks that ran within each deep idle exit, keyed by the idle exit they belong
+-- to. Materialized because the three aggregates below all read it.
+CREATE PERFETTO TABLE _ii_idle_tasks AS
+SELECT ts, dur, cpu, utid, idle_group
+FROM _wattson_task_slices
+WHERE
+  idle_group IS NOT NULL
+UNION ALL
+SELECT ts, dur, cpu, 0 AS utid, idle_group FROM _ii_idle_swapper_gaps;
+
+-- Since sorted by time, MIN() is fast aggregate function that will return the
+-- first time slice, which will be the utid = 0 slice immediately succeeding the
+-- idle to active transition, and immediately preceding the active task
+CREATE PERFETTO TABLE _ii_first_swapper_slice AS
+SELECT ts, dur, cpu, idle_group, min(ts) AS min
+FROM _ii_idle_tasks
+WHERE
+  utid IN (SELECT utid FROM thread WHERE is_idle)
+GROUP BY
+  idle_group;
+
+-- MIN() here will give the first active task immediately succeeding the idle
+-- to active transition slice, which means this the the task that causes the
+-- idle exit
+CREATE PERFETTO TABLE _ii_first_non_swapper_slice AS
+SELECT idle_group, utid, min(ts) AS min, min(ts) + dur AS next_ts
+FROM _ii_idle_tasks
+WHERE
+  NOT (utid IN (SELECT utid FROM thread WHERE is_idle))
+GROUP BY
+  idle_group;
+
+-- MAX() here will give the last time slice in the group. This will be the
+-- utid = 0 slice immediately preceding the active to idle transition.
+CREATE PERFETTO TABLE _ii_last_swapper_slice AS
+SELECT ts, dur, cpu, idle_group, max(ts) AS min
+FROM _ii_idle_tasks
+WHERE
+  utid IN (SELECT utid FROM thread WHERE is_idle)
+GROUP BY
+  idle_group;
+
+-- Gets the slices where the CPU transitions from deep idle to active, and the
+-- associated task that causes the idle exit
+CREATE PERFETTO TABLE _idle_w_tasks AS
+SELECT
+  swapper_info.ts,
+  swapper_info.dur,
+  swapper_info.cpu,
+  task_info.utid,
+  md.upid,
+  md.uid
+FROM _ii_first_non_swapper_slice AS task_info
+JOIN _ii_first_swapper_slice AS swapper_info USING (idle_group)
+JOIN _wattson_task_metadata AS md USING (utid)
+UNION ALL
+-- Adds the last slice to idle transition attribution IF this is a singleton
+-- task wakeup. This is true if there is only one task between swapper idle
+-- exits/wakeups. For example, groups with order of swapper, task X, swapper
+-- will be included. Entries that have multiple task between swappers, such as
+-- swapper, task X, task Y, swapper will not be included.
+SELECT
+  swapper_info.ts,
+  swapper_info.dur,
+  swapper_info.cpu,
+  task_info.utid,
+  md.upid,
+  md.uid
+FROM _ii_first_non_swapper_slice AS task_info
+JOIN _ii_last_swapper_slice AS swapper_info USING (idle_group)
+JOIN _wattson_task_metadata AS md USING (utid)
+WHERE
+  ts = next_ts;
+
+-- Interval intersect with the estimate power track, so that each slice can be
+-- attributed to the power of the CPU in that time duration
+CREATE PERFETTO TABLE _idle_transition_cost AS
+INTERVAL INTERSECTION OF (
+  _idle_w_tasks AS tasks,
+  _unioned_wattson_estimates_mw AS power,
+  (
+    SELECT c.cpu, s.ts, s.dur
+    FROM (SELECT DISTINCT cpu FROM _idle_w_tasks) AS c
+    CROSS JOIN (
+      SELECT min(ts) AS ts, max(ts + dur) - min(ts) AS dur FROM _system_state_mw
+    ) AS s
+  ) AS window
+) PER cpu
+|> SELECT ts, dur, cpu, tasks.utid, tasks.upid, tasks.uid, power.estimated_mw;
+
+-- Macro for easily filtering idle attribution to a specified time window. This
+-- information can then further be filtered by specific CPU and GROUP BY on
+-- either utid or upid
+CREATE PERFETTO FUNCTION _filter_idle_attribution(ts TIMESTAMP, dur LONG)
+RETURNS TABLE(
+  idle_cost_mws DOUBLE,
+  utid JOINID(task.id),
+  upid JOINID(process.id),
+  uid LONG,
+  cpu JOINID(cpu.id)
+)
+AS
+-- Give the negative sum of idle costs to the swapper thread, which by
+-- definition has a utid = 0, upid = 0, and by definition will not be defined,
+-- so need to UNION to manually add swapper thread
+WITH
+  -- Clip each cost slice to [$ts, $ts + $dur), with the same half-open and
+  -- zero-duration point semantics as interval intersection.
+  base AS (
+    SELECT
+      estimated_mw * (min(ts + dur, $ts + $dur) - max(ts, $ts)) / 1e9 AS idle_cost_mws,
+      utid,
+      upid,
+      uid,
+      cpu
+    FROM _idle_transition_cost
+    WHERE
+      (ts < $ts + $dur OR (ts = $ts AND $dur = 0))
+      AND (ts + dur > $ts OR (ts = $ts AND dur = 0))
+  )
+SELECT idle_cost_mws, utid, upid, uid, cpu FROM base
+UNION ALL
+SELECT
+  -1 * sum(idle_cost_mws) AS idle_cost_mws,
+  0 AS utid,
+  0 AS upid,
+  0 AS uid,
+  cpu
+FROM base
+GROUP BY
+  cpu;

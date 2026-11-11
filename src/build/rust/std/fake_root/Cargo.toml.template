@@ -1,0 +1,35 @@
+[package]
+name = "fake_root"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+
+[dependencies.sysroot]
+path = "../../../../RUST_SRC_ROOT/library/sysroot"
+default-features = false
+features = [
+    "profiler",
+]
+
+# TODO(crbug.com/435700430): Remove both `target_os = "fuchsia"` sections below
+# once https://github.com/rust-lang/rust/issues/151776 is resolved.
+
+# Needed because `backtrace/src/print/fuchsia.rs` unconditionally imports
+# `object` on Fuchsia even when the `backtrace` feature is disabled.
+[target.'cfg(target_os = "fuchsia")'.dependencies.std]
+path = "../../../../RUST_SRC_ROOT/library/std"
+default-features = false
+features = ["object"]
+
+[target.'cfg(target_os = "fuchsia")'.dependencies.object]
+version = "*"
+default-features = false
+features = ["rustc-dep-of-std"]
+
+[patch.crates-io]
+compiler_builtins = { path = "../../../../RUST_SRC_ROOT/library/compiler-builtins/compiler-builtins" }
+rustc-std-workspace-core = { path = '../../../../RUST_SRC_ROOT/library/rustc-std-workspace-core' }
+rustc-std-workspace-alloc = { path = '../../../../RUST_SRC_ROOT/library/rustc-std-workspace-alloc' }
+rustc-std-workspace-std = { path = '../../../../RUST_SRC_ROOT/library/rustc-std-workspace-std' }
+windows-sys = { path = '../../../../RUST_SRC_ROOT/library/windows-sys' }

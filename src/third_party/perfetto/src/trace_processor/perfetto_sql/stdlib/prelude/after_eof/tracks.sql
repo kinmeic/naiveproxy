@@ -1,0 +1,411 @@
+--
+-- Copyright 2024 The Android Open Source Project
+--
+-- Licensed under the Apache License, Version 2.0 (the "License");
+-- you may not use this file except in compliance with the License.
+-- You may obtain a copy of the License at
+--
+--     https://www.apache.org/licenses/LICENSE-2.0
+--
+-- Unless required by applicable law or agreed to in writing, software
+-- distributed under the License is distributed on an "AS IS" BASIS,
+-- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-- See the License for the specific language governing permissions and
+-- limitations under the License.
+
+-- @module prelude.after_eof.tracks
+-- Track infrastructure for organizing trace events.
+--
+-- This module provides the track concept and specialized track tables for
+-- organizing events by thread, process, CPU, and GPU contexts.
+
+INCLUDE PERFETTO MODULE prelude.after_eof.views;
+
+INCLUDE PERFETTO MODULE prelude.after_eof.cpu_scheduling;
+
+INCLUDE PERFETTO MODULE prelude.after_eof.gpu;
+
+-- Tracks are a fundamental concept in trace processor and represent a
+-- "timeline" for events of the same type and with the same context. See
+-- https://perfetto.dev/docs/analysis/trace-processor#tracks for a more
+-- detailed explanation, with examples.
+CREATE PERFETTO VIEW track(
+  -- Unique identifier for this track. Identical to |track_id|, prefer using
+  -- |track_id| instead.
+  id ID,
+  -- Name of the track; can be null for some types of tracks (e.g. thread
+  -- tracks).
+  name STRING,
+  -- The type of a track indicates the type of data the track contains.
+  --
+  -- Every track is uniquely identified by the the combination of the
+  -- type and a set of dimensions: type allow identifying a set of tracks
+  -- with the same type of data within the whole universe of tracks while
+  -- dimensions allow distinguishing between different tracks in that set.
+  type STRING,
+  -- The dimensions of the track which uniquely identify the track within a
+  -- given `type`.
+  --
+  -- Join with the `args` table or use the `EXTRACT_ARG` helper function to
+  -- expand the args.
+  dimension_arg_set_id ARGSETID,
+  -- The track which is the "parent" of this track. Only non-null for tracks
+  -- created using Perfetto's track_event API.
+  parent_id JOINID(track.id),
+  -- Generic key-value pairs containing extra information about the track.
+  --
+  -- Join with the `args` table or use the `EXTRACT_ARG` helper function to
+  -- expand the args.
+  source_arg_set_id ARGSETID,
+  -- Machine identifier
+  machine_id JOINID(machine.id),
+  -- An opaque key indicating that this track belongs to a group of tracks which
+  -- are "conceptually" the same track.
+  --
+  -- Tracks in trace processor don't allow overlapping events to allow for easy
+  -- analysis (i.e. SQL window functions, SPAN JOIN and other similar
+  -- operators). However, in visualization settings (e.g. the UI), the
+  -- distinction doesn't matter and all tracks with the same `track_group_id`
+  -- should be merged together into a single logical "UI track".
+  track_group_id LONG
+)
+AS
+SELECT
+  id,
+  name,
+  type,
+  dimension_arg_set_id,
+  parent_id,
+  source_arg_set_id,
+  machine_id,
+  track_group_id
+FROM __intrinsic_track;
+
+-- Tracks which are associated to a single thread.
+CREATE PERFETTO TABLE thread_track(
+  -- Unique identifier for this thread track.
+  id ID(track.id),
+  -- Name of the track.
+  name STRING,
+  -- The type of a track indicates the type of data the track contains.
+  --
+  -- Every track is uniquely identified by the the combination of the
+  -- type and a set of dimensions: type allow identifying a set of tracks
+  -- with the same type of data within the whole universe of tracks while
+  -- dimensions allow distinguishing between different tracks in that set.
+  type STRING,
+  -- The track which is the "parent" of this track. Only non-null for tracks
+  -- created using Perfetto's track_event API.
+  parent_id JOINID(track.id),
+  -- Args for this track which store information about "source" of this track in
+  -- the trace. For example: whether this track orginated from atrace, Chrome
+  -- tracepoints etc.
+  source_arg_set_id ARGSETID,
+  -- Machine identifier
+  machine_id JOINID(machine.id),
+  -- The utid that the track is associated with.
+  utid JOINID(thread.id)
+)
+AS
+SELECT
+  t.id,
+  t.name,
+  t.type,
+  t.parent_id,
+  t.source_arg_set_id,
+  t.machine_id,
+  a.int_value AS utid
+FROM __intrinsic_track AS t
+JOIN args AS a
+  ON t.dimension_arg_set_id = a.arg_set_id
+WHERE
+  t.event_type = 'slice'
+  AND a.key = 'utid';
+
+-- Tracks which are associated to a single process.
+CREATE PERFETTO TABLE process_track(
+  -- Unique identifier for this process track.
+  id ID(track.id),
+  -- Name of the track.
+  name STRING,
+  -- The type of a track indicates the type of data the track contains.
+  --
+  -- Every track is uniquely identified by the the combination of the
+  -- type and a set of dimensions: type allow identifying a set of tracks
+  -- with the same type of data within the whole universe of tracks while
+  -- dimensions allow distinguishing between different tracks in that set.
+  type STRING,
+  -- The track which is the "parent" of this track. Only non-null for tracks
+  -- created using Perfetto's track_event API.
+  parent_id JOINID(track.id),
+  -- Args for this track which store information about "source" of this track in
+  -- the trace. For example: whether this track orginated from atrace, Chrome
+  -- tracepoints etc.
+  source_arg_set_id ARGSETID,
+  -- Machine identifier
+  machine_id JOINID(machine.id),
+  -- The upid that the track is associated with.
+  upid JOINID(process.id)
+)
+AS
+SELECT
+  t.id,
+  t.name,
+  t.type,
+  t.parent_id,
+  t.source_arg_set_id,
+  t.machine_id,
+  a.int_value AS upid
+FROM __intrinsic_track AS t
+JOIN args AS a
+  ON t.dimension_arg_set_id = a.arg_set_id
+WHERE
+  t.event_type = 'slice'
+  AND a.key = 'upid';
+
+-- Tracks which are associated to a single CPU.
+CREATE PERFETTO TABLE cpu_track(
+  -- Unique identifier for this cpu track.
+  id ID(track.id),
+  -- Name of the track.
+  name STRING,
+  -- The type of a track indicates the type of data the track contains.
+  --
+  -- Every track is uniquely identified by the the combination of the
+  -- type and a set of dimensions: type allow identifying a set of tracks
+  -- with the same type of data within the whole universe of tracks while
+  -- dimensions allow distinguishing between different tracks in that set.
+  type STRING,
+  -- The track which is the "parent" of this track. Only non-null for tracks
+  -- created using Perfetto's track_event API.
+  parent_id JOINID(track.id),
+  -- Args for this track which store information about "source" of this track in
+  -- the trace. For example: whether this track orginated from atrace, Chrome
+  -- tracepoints etc.
+  source_arg_set_id ARGSETID,
+  -- Machine identifier
+  machine_id JOINID(machine.id),
+  -- The CPU that the track is associated with.
+  cpu LONG
+)
+AS
+SELECT
+  t.id,
+  t.name,
+  t.type,
+  t.parent_id,
+  t.source_arg_set_id,
+  t.machine_id,
+  a.int_value AS cpu
+FROM __intrinsic_track AS t
+JOIN args AS a
+  ON t.dimension_arg_set_id = a.arg_set_id
+WHERE
+  t.event_type = 'slice'
+  AND a.key = 'cpu';
+
+-- Table containing tracks which are loosely tied to a GPU.
+--
+-- NOTE: this table is deprecated due to inconsistency of it's design with
+-- other track tables (e.g. not having a GPU column, mixing a bunch of different
+-- tracks which are barely related). Please use the track table directly
+-- instead.
+CREATE PERFETTO TABLE gpu_track(
+  -- Unique identifier for this cpu track.
+  id ID(track.id),
+  -- Name of the track.
+  name STRING,
+  -- The type of a track indicates the type of data the track contains.
+  --
+  -- Every track is uniquely identified by the the combination of the
+  -- type and a set of dimensions: type allow identifying a set of tracks
+  -- with the same type of data within the whole universe of tracks while
+  -- dimensions allow distinguishing between different tracks in that set.
+  type STRING,
+  -- The track which is the "parent" of this track. Only non-null for tracks
+  -- created using Perfetto's track_event API.
+  parent_id JOINID(track.id),
+  -- Args for this track which store information about "source" of this track in
+  -- the trace. For example: whether this track orginated from atrace, Chrome
+  -- tracepoints etc.
+  source_arg_set_id ARGSETID,
+  -- The dimensions of the track which uniquely identify the track within a
+  -- given type.
+  dimension_arg_set_id ARGSETID,
+  -- Machine identifier
+  machine_id JOINID(machine.id),
+  -- The source of the track. Deprecated.
+  scope STRING,
+  -- The description for the track.
+  description STRING,
+  -- The context id for the GPU this track is associated to.
+  context_id LONG
+)
+AS
+SELECT
+  id,
+  name,
+  type,
+  parent_id,
+  source_arg_set_id,
+  dimension_arg_set_id,
+  machine_id,
+  type AS scope,
+  extract_arg(source_arg_set_id, 'description') AS description,
+  extract_arg(dimension_arg_set_id, 'context_id') AS context_id
+FROM __intrinsic_track
+WHERE
+  type IN (
+    'drm_vblank',
+    'drm_sched_ring',
+    'drm_fence',
+    'mali_mcu_state',
+    'gpu_render_stage',
+    'vulkan_events',
+    'gpu_log',
+    'graphics_frame_event'
+  );
+
+CREATE PERFETTO TABLE _track_dimension_data(
+  track_id JOINID(track.id),
+  name STRING,
+  int_value LONG,
+  string_value STRING,
+  display_name STRING,
+  is_well_known BOOL,
+  display_value STRING
+)
+AS
+-- Custom dimensions come from imported declarations; well known values come
+-- from track columns and entity metadata.
+SELECT
+  track_id,
+  name,
+  int_value,
+  string_value,
+  display_name,
+  0 AS is_well_known,
+  coalesce(cast_string!(int_value), string_value) AS display_value
+FROM __intrinsic_track_dimension
+UNION ALL
+SELECT
+  t.id AS track_id,
+  'machine' AS name,
+  t.machine_id AS int_value,
+  NULL AS string_value,
+  m.name AS display_name,
+  1 AS is_well_known,
+  cast_string!(m.label_index) AS display_value
+FROM __intrinsic_track AS t
+LEFT JOIN machine AS m
+  ON m.id = t.machine_id
+UNION ALL
+SELECT
+  t.id AS track_id,
+  'process' AS name,
+  t.upid AS int_value,
+  NULL AS string_value,
+  p.name AS display_name,
+  1 AS is_well_known,
+  cast_string!(p.pid) AS display_value
+FROM __intrinsic_track AS t
+LEFT JOIN process AS p
+  ON p.upid = t.upid
+WHERE
+  t.upid IS NOT NULL
+UNION ALL
+SELECT
+  t.id AS track_id,
+  'thread' AS name,
+  t.utid AS int_value,
+  NULL AS string_value,
+  th.name AS display_name,
+  1 AS is_well_known,
+  cast_string!(th.tid) AS display_value
+FROM __intrinsic_track AS t
+LEFT JOIN thread AS th
+  ON th.utid = t.utid
+WHERE
+  t.utid IS NOT NULL
+UNION ALL
+-- Tracks only have the per machine CPU number: the machine aware id is the one
+-- of the CPU with that number on the machine of the track.
+SELECT
+  t.id AS track_id,
+  'cpu' AS name,
+  c.id AS int_value,
+  NULL AS string_value,
+  NULL AS display_name,
+  1 AS is_well_known,
+  cast_string!(c.cpu) AS display_value
+FROM __intrinsic_track AS t
+JOIN cpu AS c
+  ON c.machine_id = t.machine_id
+  AND c.cpu = extract_arg(t.dimension_arg_set_id, 'cpu')
+UNION ALL
+SELECT
+  t.id AS track_id,
+  'gpu' AS name,
+  extract_arg(t.dimension_arg_set_id, 'ugpu') AS int_value,
+  NULL AS string_value,
+  g.name AS display_name,
+  1 AS is_well_known,
+  cast_string!(g.gpu) AS display_value
+FROM __intrinsic_track AS t
+LEFT JOIN gpu AS g
+  ON g.id = extract_arg(t.dimension_arg_set_id, 'ugpu')
+WHERE
+  extract_arg(t.dimension_arg_set_id, 'ugpu') IS NOT NULL;
+
+CREATE PERFETTO INDEX _track_dimension_data_track_id ON _track_dimension_data(
+  track_id
+);
+
+-- The dimensions of every track.
+--
+-- A dimension is a named, typed key/value which is part of a track's identity.
+-- There is one vocabulary for all of them:
+--  * *well known* dimensions (`machine`, `process`, `thread`, `cpu`, `gpu`)
+--    are derived by trace processor for every track. Their values are trace
+--    processor identities (`machine.id`, `upid`, `utid`, `cpu.id`, `gpu.id`).
+--    Note that tracks only associated with a thread don't have a `process`
+--    dimension: use `thread.upid` for those.
+--  * *custom* dimensions are declared by producers with
+--    `TrackDescriptor.dimensions` (e.g. `rank` for a distributed training
+--    job). They apply to the declaring track and its `parent_uuid`
+--    descendants, nothing else: e.g. a dimension declared on a process track
+--    only reaches the tracks of its threads if they are `parent_uuid` children
+--    of the process track. Use `thread.upid` to join the tracks of a thread to
+--    the tracks of its process otherwise.
+CREATE PERFETTO VIEW track_dimension(
+  -- The track this dimension applies to.
+  track_id JOINID(track.id),
+  -- The canonical dimension name, e.g. 'rank' or 'machine'.
+  name STRING,
+  -- The value, for integer valued dimensions.
+  int_value LONG,
+  -- The value, for string valued dimensions. Exactly one of `int_value` and
+  -- `string_value` is non-null.
+  string_value STRING,
+  -- Optional human readable label for this *value*: producer-supplied for
+  -- custom dimensions, or the corresponding entity name for well known ones
+  -- (e.g. `process.name`). Presentation only, not part of the identity.
+  display_name STRING,
+  -- Whether this is a well known dimension, i.e. one which trace processor
+  -- understands and whose value means the same thing across data sources.
+  is_well_known BOOL,
+  -- Human readable value: the producer's value for custom dimensions, or the
+  -- CPU/GPU number, pid/tid or machine label index for well known ones. Joins
+  -- and identity use `int_value` / `string_value`, not this presentation text.
+  display_value STRING
+)
+AS
+SELECT
+  track_id,
+  name,
+  int_value,
+  string_value,
+  display_name,
+  is_well_known,
+  display_value
+FROM _track_dimension_data;

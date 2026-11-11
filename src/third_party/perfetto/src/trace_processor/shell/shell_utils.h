@@ -1,0 +1,53 @@
+/*
+ * Copyright (C) 2026 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#ifndef SRC_TRACE_PROCESSOR_SHELL_SHELL_UTILS_H_
+#define SRC_TRACE_PROCESSOR_SHELL_SHELL_UTILS_H_
+
+#include <string>
+#include <string_view>
+
+#include "perfetto/base/status.h"
+#include "perfetto/trace_processor/trace_processor.h"
+
+namespace perfetto::trace_processor {
+
+bool StderrSupportsColors();
+
+enum class StatusLabelStyle {
+  kSuccess,  // e.g. "Trace loaded"
+  kHint,     // e.g. "Tip", "hint"
+  kMuted,    // routine information, e.g. query timings
+};
+
+// Prints a status line to stderr for people (rather than a log line, which
+// carries a timestamp and source location). |label| is highlighted according
+// to |style| when stderr supports colors and is followed by ": " and
+// |message| unless |message| is empty.
+void PrintStatusLine(StatusLabelStyle style,
+                     std::string_view label,
+                     std::string_view message);
+
+base::Status PrintStats(TraceProcessor* tp);
+
+// Exports the contents of Trace Processor in |format| to |output_name|.
+base::Status ExportTrace(TraceProcessor* trace_processor,
+                         TraceProcessor::ExportFormat format,
+                         const std::string& output_name);
+
+}  // namespace perfetto::trace_processor
+
+#endif  // SRC_TRACE_PROCESSOR_SHELL_SHELL_UTILS_H_

@@ -1,0 +1,16 @@
+Name: xdg-user-dirs
+URL: https://gitlab.freedesktop.org/xdg/xdg-user-dirs
+Version: v0.20
+Update Mechanism: Manual
+License: MIT
+License File: LICENSE
+Security Critical: yes
+Shipped: yes
+
+src/ includes xdg-user-dir-lookup.c renamed as xdg_user_dir_lookup.cc
+and xdg-user-dir-lookup.h from xdg-user-dirs.
+
+Update instructions:
+Update commit hashes in crowbar.txtpb, then run from
+this directory:
+crowbar build --no-dry-run ./

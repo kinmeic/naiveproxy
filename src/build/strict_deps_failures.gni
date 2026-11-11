@@ -1,0 +1,19 @@
+# Copyright 2026 The Chromium Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+# The process for enabling strict deps everywhere will be:
+# 1) (complete) Have an exception //*
+# 2) Shard //* -> //toplevel/* and //third_party/toplevel/*
+# 3) Allowlist every single existing exception
+# 4) Attempt to remove all directory entries from the allowlist.
+#    This may require allowlisting new existing exemptions.
+#    This will result in ~100k exemptions being added.
+# 5) Start fixing rules
+# 6) Start fixing includers
+
+check_includes_strict_exceptions = [
+  {
+    includer = "//*"
+  },
+]

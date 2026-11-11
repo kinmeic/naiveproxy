@@ -1,0 +1,70 @@
+/*
+ * Copyright (C) 2026 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#ifndef SRC_TRACE_PROCESSOR_SHELL_QUERY_SUBCOMMAND_H_
+#define SRC_TRACE_PROCESSOR_SHELL_QUERY_SUBCOMMAND_H_
+
+#include <cstdint>
+#include <string>
+#include <vector>
+
+#include "perfetto/base/status.h"
+#include "perfetto/ext/base/status_or.h"
+#include "src/trace_processor/shell/agent_mode.h"
+#include "src/trace_processor/shell/result_formatter.h"
+#include "src/trace_processor/shell/subcommand.h"
+
+namespace perfetto::trace_processor::shell {
+
+class QuerySubcommand : public Subcommand {
+ public:
+  const char* name() const override;
+  const char* description() const override;
+  const char* usage_args() const override;
+  const char* detailed_help() const override;
+  std::vector<FlagSpec> GetFlags() override;
+  base::Status Run(const SubcommandContext& ctx) override;
+
+ private:
+  // Resolves the output format from agent mode, --format and the --max-*
+  // flags.
+  base::StatusOr<ResultFormatOptions> ResolveFormat(
+      const AgentMode& agent_mode);
+
+  // Run() minus agent-mode error reporting.
+  base::Status ExecuteAndPrint(const SubcommandContext& ctx,
+                               const AgentMode& agent_mode);
+
+  base::Status RunStructuredQuery(const SubcommandContext& ctx,
+                                  const std::string& trace_file,
+                                  const ResultFormatOptions& format);
+
+  std::string query_file_;
+  std::string structured_query_id_;
+  std::vector<std::string> structured_query_specs_;
+  bool interactive_ = false;
+  std::string perf_file_;
+  std::string format_;
+  bool agent_ = false;
+  bool no_agent_ = false;
+  std::string max_rows_;
+  std::string max_bytes_;
+  std::string max_cell_width_;
+};
+
+}  // namespace perfetto::trace_processor::shell
+
+#endif  // SRC_TRACE_PROCESSOR_SHELL_QUERY_SUBCOMMAND_H_
