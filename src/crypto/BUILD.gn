@@ -135,10 +135,15 @@ component("crypto") {
     sources += [
       "scoped_capi_types.h",
       "scoped_cng_types.h",
-      "unexportable_key_win.cc",
       "unexportable_key_win.h",
       "user_verifying_key_win.cc",
     ]
+    # The standalone build does not generate Chromium's Rust TPM bindings.
+    if (build_with_chromium) {
+      sources += [ "unexportable_key_win.cc" ]
+    } else {
+      sources += [ "unexportable_key_win_stub.cc" ]
+    }
     libs = [
       "crypt32.lib",
       "ncrypt.lib",
