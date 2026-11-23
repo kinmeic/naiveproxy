@@ -496,6 +496,8 @@ component("base") {
     "memory_coordinator/memory_coordinator_features.h",
     "memory_coordinator/memory_limit.cc",
     "memory_coordinator/memory_limit.h",
+    "memory_coordinator/memory_pressure_source.cc",
+    "memory_coordinator/memory_pressure_source.h",
     "memory_coordinator/multi_memory_consumer.cc",
     "memory_coordinator/multi_memory_consumer.h",
     "memory_coordinator/traits.cc",

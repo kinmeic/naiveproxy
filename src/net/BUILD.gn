@@ -1175,6 +1175,8 @@ component("net") {
     "url_request/url_request_error_job.h",
     "url_request/url_request_http_job.cc",
     "url_request/url_request_http_job.h",
+    "url_request/url_request_http_transaction_factory_override.cc",
+    "url_request/url_request_http_transaction_factory_override.h",
     "url_request/url_request_interceptor.cc",
     "url_request/url_request_interceptor.h",
     "url_request/url_request_job.cc",
