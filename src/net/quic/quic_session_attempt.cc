@@ -1,0 +1,579 @@
+// Copyright 2024 The Chromium Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+#include "net/quic/quic_session_attempt.h"
+
+#include <algorithm>
+#include <vector>
+
+#include "base/auto_reset.h"
+#include "base/containers/flat_set.h"
+#include "base/feature_list.h"
+#include "base/metrics/histogram_functions.h"
+#include "base/metrics/histogram_macros.h"
+#include "base/notreached.h"
+#include "base/strings/strcat.h"
+#include "net/base/completion_once_callback.h"
+#include "net/base/features.h"
+#include "net/base/net_error_details.h"
+#include "net/base/net_errors.h"
+#include "net/dns/dns_alias_utility.h"
+#include "net/dns/public/host_resolver_results.h"
+#include "net/log/net_log_with_source.h"
+#include "net/quic/address_utils.h"
+#include "net/quic/quic_http_stream.h"
+#include "net/quic/quic_session_pool.h"
+#include "net/spdy/multiplexed_session_creation_initiator.h"
+#include "net/third_party/quiche/src/quiche/quic/core/quic_versions.h"
+
+namespace net {
+
+namespace {
+
+enum class JobProtocolErrorLocation {
+  kSessionStartReadingFailedAsync = 0,
+  kSessionStartReadingFailedSync = 1,
+  kCreateSessionFailedAsync = 2,
+  kCreateSessionFailedSync = 3,
+  kCryptoConnectFailedSync = 4,
+  kCryptoConnectFailedAsync = 5,
+  kMaxValue = kCryptoConnectFailedAsync,
+};
+
+void HistogramProtocolErrorLocation(enum JobProtocolErrorLocation location) {
+  UMA_HISTOGRAM_ENUMERATION("Net.QuicStreamFactory.DoConnectFailureLocation",
+                            location);
+}
+
+void LogStaleConnectionTime(base::TimeTicks start_time) {
+  UMA_HISTOGRAM_TIMES("Net.QuicSession.StaleConnectionTime",
+                      base::TimeTicks::Now() - start_time);
+}
+
+void LogValidConnectionTime(base::TimeTicks start_time) {
+  UMA_HISTOGRAM_TIMES("Net.QuicSession.ValidConnectionTime",
+                      base::TimeTicks::Now() - start_time);
+}
+
+}  // namespace
+
+const base::flat_set<std::string>* QuicSessionAttempt::Delegate::GetDnsAliases()
+    const {
+  return nullptr;
+}
+
+QuicSessionAttempt::QuicSessionAttempt(
+    Delegate* delegate,
+    IPEndPoint ip_endpoint,
+    ConnectionEndpointMetadata metadata,
+    quic::ParsedQuicVersion quic_version,
+    int cert_verify_flags,
+    base::TimeTicks dns_resolution_start_time,
+    base::TimeTicks dns_resolution_end_time,
+    std::optional<ResolutionDetails> resolution_details,
+    bool retry_on_alternate_network_before_handshake,
+    bool use_dns_aliases,
+    base::flat_set<std::string> dns_aliases,
+    std::unique_ptr<QuicCryptoClientConfigHandle> crypto_client_config_handle,
+    MultiplexedSessionCreationInitiator session_creation_initiator,
+    QuicConnectionReuseDetails quic_connection_reuse_details,
+    std::optional<ConnectionManagementConfig> connection_management_config,
+    bool is_stale)
+    : delegate_(delegate),
+      start_time_(base::TimeTicks::Now()),
+      ip_endpoint_(std::move(ip_endpoint)),
+      metadata_(std::move(metadata)),
+      quic_version_(std::move(quic_version)),
+      cert_verify_flags_(cert_verify_flags),
+      dns_resolution_start_time_(dns_resolution_start_time),
+      dns_resolution_end_time_(dns_resolution_end_time),
+      resolution_details_(std::move(resolution_details)),
+      is_stale_(is_stale),
+      was_alternative_service_recently_broken_(
+          pool()->WasQuicRecentlyBroken(key().session_key())),
+      retry_on_alternate_network_before_handshake_(
+          retry_on_alternate_network_before_handshake),
+      use_dns_aliases_(use_dns_aliases),
+      dns_aliases_(std::move(dns_aliases)),
+      crypto_client_config_handle_(std::move(crypto_client_config_handle)),
+      session_creation_initiator_(session_creation_initiator),
+      quic_connection_reuse_details_(quic_connection_reuse_details),
+      connection_management_config_(connection_management_config) {
+  CHECK(delegate_);
+  DCHECK_NE(quic_version_, quic::ParsedQuicVersion::Unsupported());
+}
+
+QuicSessionAttempt::QuicSessionAttempt(
+    Delegate* delegate,
+    IPEndPoint local_endpoint,
+    IPEndPoint proxy_peer_endpoint,
+    quic::ParsedQuicVersion quic_version,
+    int cert_verify_flags,
+    std::unique_ptr<QuicChromiumClientStream::Handle> proxy_stream,
+    const HttpUserAgentSettings* http_user_agent_settings,
+    MultiplexedSessionCreationInitiator session_creation_initiator,
+    QuicConnectionReuseDetails quic_connection_reuse_details,
+    std::optional<ConnectionManagementConfig> connection_management_config,
+    bool is_stale)
+    : delegate_(delegate),
+      ip_endpoint_(std::move(proxy_peer_endpoint)),
+      quic_version_(std::move(quic_version)),
+      cert_verify_flags_(cert_verify_flags),
+      is_stale_(is_stale),
+      was_alternative_service_recently_broken_(
+          pool()->WasQuicRecentlyBroken(key().session_key())),
+      retry_on_alternate_network_before_handshake_(false),
+      use_dns_aliases_(false),
+      proxy_stream_(std::move(proxy_stream)),
+      http_user_agent_settings_(http_user_agent_settings),
+      local_endpoint_(std::move(local_endpoint)),
+      session_creation_initiator_(session_creation_initiator),
+      quic_connection_reuse_details_(quic_connection_reuse_details),
+      connection_management_config_(connection_management_config) {
+  CHECK(delegate_);
+  DCHECK_NE(quic_version_, quic::ParsedQuicVersion::Unsupported());
+}
+
+QuicSessionAttempt::~QuicSessionAttempt() = default;
+
+int QuicSessionAttempt::Start(CompletionOnceCallback callback) {
+  CHECK_EQ(next_state_, State::kNone);
+
+  next_state_ = State::kCreateSession;
+  int rv = DoLoop(OK);
+  if (rv != ERR_IO_PENDING) {
+    return rv;
+  }
+
+  callback_ = std::move(callback);
+  return rv;
+}
+
+void QuicSessionAttempt::Cancel() {
+  CancelInternal(CancelReason::kCancelled);
+}
+
+void QuicSessionAttempt::CancelForProactiveIpPooling() {
+  CancelInternal(CancelReason::kProactiveIpPooling);
+}
+
+void QuicSessionAttempt::CancelInternal(CancelReason reason) {
+  CHECK_NE(next_state_, State::kNone);
+
+  next_state_ = State::kNone;
+  callback_.Reset();
+  weak_ptr_factory_.InvalidateWeakPtrs();
+  if (cancel_reason_) {
+    cancel_reason_->data = reason;
+  }
+  net_log().EndEventWithNetErrorCode(
+      NetLogEventType::QUIC_SESSION_POOL_JOB_CONNECT, ERR_ABORTED);
+
+  if (!session_) {
+    return;
+  }
+
+  QuicChromiumClientSession* session = session_.get();
+  CHECK(!pool()->IsSessionActive(session));
+  session_ = nullptr;
+  quic::QuicErrorCode quic_error = quic::QUIC_CONNECTION_CANCELLED;
+  if (reason == CancelReason::kProactiveIpPooling) {
+    session->MarkClosedByProactiveIpPooling();
+    quic_error = quic::QUIC_CONNECTION_IP_POOLED;
+  }
+  session->CloseSessionOnError(ERR_ABORTED, quic_error,
+                               quic::ConnectionCloseBehavior::SILENT_CLOSE);
+}
+
+void QuicSessionAttempt::PopulateNetErrorDetails(
+    NetErrorDetails* details) const {
+  if (session_) {
+    details->connection_info = QuicHttpStream::ConnectionInfoFromQuicVersion(
+        session_->connection()->version());
+    details->quic_connection_error = session_->error();
+  } else {
+    details->connection_info = connection_info_;
+    details->quic_connection_error = quic_connection_error_;
+  }
+}
+
+// static
+void QuicSessionAttempt::HandleCreateSessionResult(
+    base::WeakPtr<QuicSessionAttempt> attempt,
+    scoped_refptr<base::RefCountedData<CancelReason>> cancel_reason,
+    base::expected<CreateSessionResult, int> result) {
+  if (attempt) {
+    attempt->OnCreateSessionComplete(std::move(result));
+    return;
+  }
+
+  // Session creation can outlive a cancelled attempt. Close a session that
+  // finished being created after its owner went away instead of leaving it in
+  // QuicSessionPool until its handshake or idle timeout.
+  if (result.has_value()) {
+    quic::QuicErrorCode quic_error = quic::QUIC_CONNECTION_CANCELLED;
+    if (cancel_reason &&
+        cancel_reason->data == CancelReason::kProactiveIpPooling) {
+      result->session->MarkClosedByProactiveIpPooling();
+      quic_error = quic::QUIC_CONNECTION_IP_POOLED;
+    }
+    result->session->CloseSessionOnErrorLater(
+        ERR_ABORTED, quic_error, quic::ConnectionCloseBehavior::SILENT_CLOSE);
+  }
+}
+
+int QuicSessionAttempt::DoLoop(int rv) {
+  CHECK(!in_loop_);
+  CHECK_NE(next_state_, State::kNone);
+  CHECK_NE(rv, ERR_IO_PENDING);
+
+  base::AutoReset<bool> auto_reset(&in_loop_, true);
+  do {
+    State state = next_state_;
+    next_state_ = State::kNone;
+    switch (state) {
+      case State::kNone:
+        NOTREACHED() << "Invalid state";
+      case State::kCreateSession:
+        rv = DoCreateSession();
+        break;
+      case State::kCreateSessionComplete:
+        rv = DoCreateSessionComplete(rv);
+        break;
+      case State::kCryptoConnect:
+        rv = DoCryptoConnect(rv);
+        break;
+      case State::kConfirmConnection:
+        rv = DoConfirmConnection(rv);
+        break;
+    }
+  } while (next_state_ != State::kNone && rv != ERR_IO_PENDING);
+  return rv;
+}
+
+int QuicSessionAttempt::DoCreateSession() {
+  quic_connection_start_time_ = base::TimeTicks::Now();
+  next_state_ = State::kCreateSessionComplete;
+
+  const bool require_confirmation =
+      was_alternative_service_recently_broken_ || is_stale_;
+  net_log().AddEntryWithBoolParams(
+      NetLogEventType::QUIC_SESSION_POOL_JOB_CONNECT, NetLogEventPhase::BEGIN,
+      "require_confirmation", require_confirmation);
+
+  int rv;
+  if (proxy_stream_) {
+    std::string user_agent;
+    if (http_user_agent_settings_) {
+      user_agent = http_user_agent_settings_->GetUserAgent();
+    }
+    // Proxied connections are not on any specific network.
+    network_ = handles::kInvalidNetworkHandle;
+    cancel_reason_ = base::MakeRefCounted<base::RefCountedData<CancelReason>>(
+        CancelReason::kCancelled);
+    rv = pool()->CreateSessionOnProxyStream(
+        base::BindOnce(&QuicSessionAttempt::HandleCreateSessionResult,
+                       weak_ptr_factory_.GetWeakPtr(), cancel_reason_),
+        key(), quic_version_, cert_verify_flags_, require_confirmation,
+        std::move(local_endpoint_), std::move(ip_endpoint_),
+        std::move(proxy_stream_), std::move(user_agent), net_log(), network_,
+        session_creation_initiator_, quic_connection_reuse_details_);
+  } else {
+    if (base::FeatureList::IsEnabled(net::features::kAsyncQuicSession)) {
+      cancel_reason_ = base::MakeRefCounted<base::RefCountedData<CancelReason>>(
+          CancelReason::kCancelled);
+      return pool()->CreateSessionAsync(
+          base::BindOnce(&QuicSessionAttempt::HandleCreateSessionResult,
+                         weak_ptr_factory_.GetWeakPtr(), cancel_reason_),
+          key(), quic_version_, cert_verify_flags_, require_confirmation,
+          ip_endpoint_, metadata_, dns_resolution_start_time_,
+          dns_resolution_end_time_, resolution_details_, net_log(), network_,
+          session_creation_initiator_, quic_connection_reuse_details_,
+          connection_management_config_);
+    }
+    rv = pool()->CreateSessionSync(
+        key(), quic_version_, cert_verify_flags_, require_confirmation,
+        ip_endpoint_, metadata_, dns_resolution_start_time_,
+        dns_resolution_end_time_, resolution_details_, net_log(), &session_,
+        &network_, session_creation_initiator_, quic_connection_reuse_details_,
+        connection_management_config_);
+
+    DVLOG(1) << "Created session on network: " << network_;
+  }
+  if (rv == ERR_QUIC_PROTOCOL_ERROR) {
+    DCHECK(!session_);
+    HistogramProtocolErrorLocation(
+        JobProtocolErrorLocation::kCreateSessionFailedSync);
+  }
+  return rv;
+}
+
+int QuicSessionAttempt::DoCreateSessionComplete(int rv) {
+  session_creation_finished_ = true;
+  if (rv != OK) {
+    CHECK(!session_);
+    // Log end event with error since we're skipping DoConfirmConnection().
+    net_log().EndEventWithNetErrorCode(
+        NetLogEventType::QUIC_SESSION_POOL_JOB_CONNECT, rv);
+    return rv;
+  }
+
+  next_state_ = State::kCryptoConnect;
+  if (!session_->connection()->connected()) {
+    return ERR_CONNECTION_CLOSED;
+  }
+
+  CHECK(session_);
+  session_->StartReading();
+  if (!session_->connection()->connected()) {
+    if (base::FeatureList::IsEnabled(net::features::kAsyncQuicSession)) {
+      HistogramProtocolErrorLocation(
+          JobProtocolErrorLocation::kSessionStartReadingFailedAsync);
+    } else {
+      HistogramProtocolErrorLocation(
+          JobProtocolErrorLocation::kSessionStartReadingFailedSync);
+    }
+    return ERR_QUIC_PROTOCOL_ERROR;
+  }
+  return OK;
+}
+
+int QuicSessionAttempt::DoCryptoConnect(int rv) {
+  if (rv != OK) {
+    // Log end event with error since we're skipping DoConfirmConnection().
+    net_log().EndEventWithNetErrorCode(
+        NetLogEventType::QUIC_SESSION_POOL_JOB_CONNECT, rv);
+    // Reset `session_` to avoid dangling pointer.
+    ResetSession();
+    return rv;
+  }
+
+  DCHECK(session_);
+  next_state_ = State::kConfirmConnection;
+  rv = session_->CryptoConnect(
+      base::BindOnce(&QuicSessionAttempt::OnCryptoConnectComplete,
+                     weak_ptr_factory_.GetWeakPtr()));
+
+  if (rv != ERR_IO_PENDING) {
+    LogValidConnectionTime(quic_connection_start_time_);
+  }
+
+  if (!session_->connection()->connected() &&
+      session_->error() == quic::QUIC_PROOF_INVALID) {
+    return ERR_QUIC_HANDSHAKE_FAILED;
+  }
+
+  if (rv == ERR_QUIC_PROTOCOL_ERROR) {
+    HistogramProtocolErrorLocation(
+        JobProtocolErrorLocation::kCryptoConnectFailedSync);
+  }
+
+  return rv;
+}
+
+int QuicSessionAttempt::DoConfirmConnection(int rv) {
+  UMA_HISTOGRAM_TIMES("Net.QuicSession.TimeFromResolveHostToConfirmConnection",
+                      base::TimeTicks::Now() - dns_resolution_start_time_);
+  net_log().EndEventWithNetErrorCode(
+      NetLogEventType::QUIC_SESSION_POOL_JOB_CONNECT, rv);
+
+  if (was_alternative_service_recently_broken_) {
+    UMA_HISTOGRAM_BOOLEAN("Net.QuicSession.ConnectAfterBroken", rv == OK);
+  }
+
+  if (retry_on_alternate_network_before_handshake_ && session_ &&
+      !session_->OneRttKeysAvailable() &&
+      network_ == pool()->default_network()) {
+    if (session_->error() == quic::QUIC_NETWORK_IDLE_TIMEOUT ||
+        session_->error() == quic::QUIC_HANDSHAKE_TIMEOUT ||
+        session_->error() == quic::QUIC_PACKET_WRITE_ERROR) {
+      // Retry the connection on an alternate network if crypto handshake failed
+      // with network idle time out or handshake time out.
+      DCHECK(network_ != handles::kInvalidNetworkHandle);
+      network_ = pool()->FindAlternateNetwork(network_);
+      connection_retried_ = network_ != handles::kInvalidNetworkHandle;
+      UMA_HISTOGRAM_BOOLEAN(
+          "Net.QuicStreamFactory.AttemptMigrationBeforeHandshake",
+          connection_retried_);
+      UMA_HISTOGRAM_ENUMERATION(
+          "Net.QuicStreamFactory.AttemptMigrationBeforeHandshake."
+          "FailedConnectionType",
+          NetworkChangeNotifier::GetNetworkConnectionType(
+              pool()->default_network()),
+          NetworkChangeNotifier::ConnectionType::CONNECTION_LAST + 1);
+      if (connection_retried_) {
+        UMA_HISTOGRAM_ENUMERATION(
+            "Net.QuicStreamFactory.MigrationBeforeHandshake.NewConnectionType",
+            NetworkChangeNotifier::GetNetworkConnectionType(network_),
+            NetworkChangeNotifier::ConnectionType::CONNECTION_LAST + 1);
+        net_log().AddEvent(
+            NetLogEventType::QUIC_SESSION_POOL_JOB_RETRY_ON_ALTERNATE_NETWORK);
+        // Notify requests that connection on the default network failed.
+        delegate_->OnConnectionFailedOnDefaultNetwork();
+        DVLOG(1) << "Retry connection on alternate network: " << network_;
+        session_ = nullptr;
+        next_state_ = State::kCreateSession;
+        return OK;
+      }
+    }
+  }
+
+  if (connection_retried_) {
+    UMA_HISTOGRAM_BOOLEAN("Net.QuicStreamFactory.MigrationBeforeHandshake2",
+                          rv == OK);
+    if (rv == OK) {
+      UMA_HISTOGRAM_BOOLEAN(
+          "Net.QuicStreamFactory.NetworkChangeDuringMigrationBeforeHandshake",
+          network_ == pool()->default_network());
+    } else {
+      base::UmaHistogramSparse(
+          "Net.QuicStreamFactory.MigrationBeforeHandshakeFailedReason", -rv);
+    }
+  } else if (network_ != handles::kInvalidNetworkHandle &&
+             network_ != pool()->default_network()) {
+    UMA_HISTOGRAM_BOOLEAN("Net.QuicStreamFactory.ConnectionOnNonDefaultNetwork",
+                          rv == OK);
+  }
+
+  if (rv != OK) {
+    // Reset `session_` to avoid dangling pointer.
+    ResetSession();
+    return rv;
+  }
+
+  // If another request pooled to an existing session and activated our key
+  // while we were connecting (e.g., while waiting for async cert verification),
+  // this attempt is redundant.
+  if (pool()->HasActiveSession(key().session_key())) {
+    // Retrieve the active session that was created in the background.
+    QuicChromiumClientSession* existing_session =
+        pool()->FindExistingSession(key().session_key(), key().destination());
+    CHECK(existing_session);
+
+    session_->connection()->CloseConnection(
+        quic::QUIC_CONNECTION_CANCELLED,
+        "An active session already exists for the session key.",
+        quic::ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
+    session_ = existing_session;
+    return OK;
+  }
+
+  // There may well now be an active session for this IP or another resolved IP
+  // for this destination. The check above only covers exact session key matches
+  // (e.g. same-origin races). We still need to check for cross-origin IP
+  // pooling. If there is an active session for any of the resolved IPs with a
+  // matching certificate, use the existing session instead of establishing a
+  // new one.
+  const bool pool_all_endpoints = base::FeatureList::IsEnabled(
+      features::kPostHandshakeIpPoolingAllEndpoints);
+  std::vector<IPEndPoint> ip_endpoints;
+  if (pool_all_endpoints) {
+    ip_endpoints = delegate_->GetResolvedIpEndpoints();
+  }
+  base::flat_set<std::string> dns_aliases;
+  if (use_dns_aliases_) {
+    if (const base::flat_set<std::string>* refreshed_aliases =
+            delegate_->GetDnsAliases()) {
+      dns_aliases = *refreshed_aliases;
+    } else {
+      dns_aliases = std::move(dns_aliases_);
+    }
+  }
+  IPEndPoint peer_address =
+      ToIPEndPoint(session_->connection()->peer_address());
+  if (!std::ranges::contains(ip_endpoints, peer_address)) {
+    ip_endpoints.push_back(peer_address);
+  }
+  // Only attach `dns_aliases` on post-handshake IP pooling when
+  // `kPostHandshakeIpPoolingAllEndpoints` is enabled, keeping the Finch control
+  // arm identical to baseline behavior.
+  if (QuicChromiumClientSession* matching_session =
+          pool()->HasMatchingIpSession(
+              key(), ip_endpoints,
+              pool_all_endpoints ? dns_aliases
+                                 : dns_alias_utility::EmptyDnsAliases(),
+              use_dns_aliases_)) {
+    QuicSessionPool::LogConnectionIpPooling(true);
+    session_->connection()->CloseConnection(
+        quic::QUIC_CONNECTION_IP_POOLED,
+        "An active session exists for the given IP.",
+        quic::ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
+    session_ = matching_session;
+    return OK;
+  }
+  QuicSessionPool::LogConnectionIpPooling(false);
+
+  pool()->ActivateSession(key(), session_, std::move(dns_aliases));
+
+  return OK;
+}
+
+void QuicSessionAttempt::OnCreateSessionComplete(
+    base::expected<CreateSessionResult, int> result) {
+  CHECK_EQ(next_state_, State::kCreateSessionComplete);
+  base::UmaHistogramTimes(
+      base::StrCat({"Net.QuicSessionAttempt.CreateSessionTime.",
+                    result.has_value() ? "Success" : "Failure"}),
+      base::TimeTicks::Now() - start_time_);
+  if (result.has_value()) {
+    session_ = result->session;
+    network_ = result->network;
+    DVLOG(1) << "Created session on network: " << network_;
+  } else {
+    if (result.error() == ERR_QUIC_PROTOCOL_ERROR) {
+      HistogramProtocolErrorLocation(
+          JobProtocolErrorLocation::kCreateSessionFailedAsync);
+    }
+  }
+
+  int rv = DoLoop(result.error_or(OK));
+
+  delegate_->OnQuicSessionCreationComplete(rv);
+
+  MaybeInvokeCallback(rv);
+}
+
+void QuicSessionAttempt::OnCryptoConnectComplete(int rv) {
+  CHECK_EQ(next_state_, State::kConfirmConnection);
+
+  base::UmaHistogramTimes(
+      base::StrCat({"Net.QuicSessionAttempt.CryptoConnectTime.",
+                    rv == OK ? "Success" : "Failure"}),
+      base::TimeTicks::Now() - start_time_);
+
+  // This early return will be triggered when CloseSessionOnError is called
+  // before crypto handshake has completed.
+  if (!session_) {
+    LogStaleConnectionTime(quic_connection_start_time_);
+    return;
+  }
+
+  if (rv == ERR_QUIC_PROTOCOL_ERROR) {
+    HistogramProtocolErrorLocation(
+        JobProtocolErrorLocation::kCryptoConnectFailedAsync);
+  }
+
+  rv = DoLoop(rv);
+  MaybeInvokeCallback(rv);
+}
+
+void QuicSessionAttempt::MaybeInvokeCallback(int rv) {
+  if (rv != ERR_IO_PENDING && !callback_.is_null()) {
+    base::UmaHistogramTimes(
+        base::StrCat({"Net.QuicSessionAttempt.CompleteTime.",
+                      rv == OK ? "Success" : "Failure"}),
+        base::TimeTicks::Now() - start_time_);
+    std::move(callback_).Run(rv);
+  }
+}
+
+void QuicSessionAttempt::ResetSession() {
+  CHECK(session_);
+  connection_info_ = QuicHttpStream::ConnectionInfoFromQuicVersion(
+      session_->connection()->version());
+  quic_connection_error_ = session_->error();
+  session_ = nullptr;
+}
+
+}  // namespace net

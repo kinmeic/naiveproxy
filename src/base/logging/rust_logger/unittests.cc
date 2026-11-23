@@ -1,0 +1,167 @@
+// Copyright 2024 The Chromium Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+#include <string>
+
+#include "base/logging.h"
+#include "base/logging/log_severity.h"
+#include "base/logging/rust_logger/test_support.rs.h"
+#include "base/test/gtest_util.h"
+#include "base/test/mock_log.h"
+#include "base/test/scoped_logging_settings.h"
+#include "testing/gtest/include/gtest/gtest.h"
+
+using testing::_;
+
+namespace base::test {
+namespace {
+
+class RustLogIntegrationTest : public testing::Test {
+ public:
+  void SetUp() override { log_.StartCapturingLogs(); }
+
+  void TearDown() override { log_.StopCapturingLogs(); }
+
+  base::test::MockLog log_;
+};
+
+// TODO(crbug.com/374023535): Logging does not work in component builds.
+#if defined(COMPONENT_BUILD)
+#define MAYBE_CheckAllSeverity DISABLED_CheckAllSeverity
+#define MAYBE_CheckVerboseSeverity DISABLED_CheckVerboseSeverity
+#else
+#define MAYBE_CheckAllSeverity CheckAllSeverity
+#define MAYBE_CheckVerboseSeverity CheckVerboseSeverity
+#endif
+TEST_F(RustLogIntegrationTest, MAYBE_CheckAllSeverity) {
+  // Debug and Trace logs from Rust are mapped to VLOG(1) and VLOG(2)
+  // respectively. At default log level (INFO), they are not emitted.
+  EXPECT_CALL(log_, Log(logging::LOGGING_INFO, _, _, _,
+                        testing::HasSubstr("test info log")))
+      .WillOnce(testing::Return(true));
+
+  EXPECT_CALL(log_, Log(logging::LOGGING_WARNING, _, _, _,
+                        testing::HasSubstr("test warning log")))
+      .WillOnce(testing::Return(true));
+
+  EXPECT_CALL(log_, Log(logging::LOGGING_ERROR, _, _, _,
+                        testing::HasSubstr("test error log")))
+      .WillOnce(testing::Return(true));
+
+  log_trace_from_rust();
+  log_debug_from_rust();
+  log_info_from_rust();
+  log_warning_from_rust();
+  log_error_from_rust();
+}
+
+TEST_F(RustLogIntegrationTest, MAYBE_CheckVerboseSeverity) {
+  logging::ScopedLoggingSettings scoped_logging_settings;
+  logging::SetMinLogLevel(-2);
+
+#if DCHECK_IS_ON()
+  // Debug and Trace logs from Rust are discarded when DCHECK_IS_ON() is false;
+  // otherwise, they are logged with verbose severities (-1 and -2).
+  EXPECT_CALL(log_,
+              Log(/*severity=*/-2, _, _, _, testing::HasSubstr("test trace log")))
+      .WillOnce(testing::Return(true));
+
+  EXPECT_CALL(log_, Log(logging::LOGGING_VERBOSE, _, _, _,
+                        testing::HasSubstr("test debug log")))
+      .WillOnce(testing::Return(true));
+#endif
+
+  EXPECT_CALL(log_, Log(logging::LOGGING_INFO, _, _, _,
+                        testing::HasSubstr("test info log")))
+      .WillOnce(testing::Return(true));
+
+  EXPECT_CALL(log_, Log(logging::LOGGING_WARNING, _, _, _,
+                        testing::HasSubstr("test warning log")))
+      .WillOnce(testing::Return(true));
+
+  EXPECT_CALL(log_, Log(logging::LOGGING_ERROR, _, _, _,
+                        testing::HasSubstr("test error log")))
+      .WillOnce(testing::Return(true));
+
+  log_trace_from_rust();
+  log_debug_from_rust();
+  log_info_from_rust();
+  log_warning_from_rust();
+  log_error_from_rust();
+}
+
+#if defined(COMPONENT_BUILD)
+#define MAYBE_DynamicMinLogLevel DISABLED_DynamicMinLogLevel
+#else
+#define MAYBE_DynamicMinLogLevel DynamicMinLogLevel
+#endif
+TEST_F(RustLogIntegrationTest, MAYBE_DynamicMinLogLevel) {
+  logging::ScopedLoggingSettings scoped_logging_settings;
+
+  // Set minimum log level to WARNING. Info logs should be disabled in Rust.
+  logging::SetMinLogLevel(logging::LOGGING_WARNING);
+  EXPECT_FALSE(is_debug_enabled_from_rust());
+  EXPECT_FALSE(is_info_enabled_from_rust());
+
+  EXPECT_CALL(log_, Log(logging::LOGGING_WARNING, _, _, _,
+                        testing::HasSubstr("test warning log")))
+      .WillOnce(testing::Return(true));
+  EXPECT_CALL(log_, Log(logging::LOGGING_ERROR, _, _, _,
+                        testing::HasSubstr("test error log")))
+      .WillOnce(testing::Return(true));
+
+  log_info_from_rust();
+  log_warning_from_rust();
+  log_error_from_rust();
+
+  // Reset minimum log level to INFO.
+  logging::SetMinLogLevel(logging::LOGGING_INFO);
+  EXPECT_FALSE(is_debug_enabled_from_rust());
+  EXPECT_TRUE(is_info_enabled_from_rust());
+
+  // Set minimum log level to verbose (-1 / VLOG(1)).
+  logging::SetMinLogLevel(logging::LOGGING_VERBOSE);
+  EXPECT_TRUE(is_info_enabled_from_rust());
+#if DCHECK_IS_ON()
+  EXPECT_TRUE(is_debug_enabled_from_rust());
+#endif
+}
+
+// TODO(crbug.com/374023535): Logging does not work in component builds.
+#if defined(COMPONENT_BUILD)
+#define MAYBE_Placeholders DISABLED_Placeholders
+#else
+#define MAYBE_Placeholders Placeholders
+#endif
+TEST_F(RustLogIntegrationTest, MAYBE_Placeholders) {
+  EXPECT_CALL(log_, Log(logging::LOGGING_ERROR, _, _, _,
+                        testing::HasSubstr("test log with placeholder 2")))
+      .WillOnce(testing::Return(true));
+
+  log_error_with_placeholder_from_rust(2);
+}
+
+// TODO(crbug.com/374023535): Logging does not work in component builds.
+// TODO(crbug.com/497896152): Avoid failures that seem CFI-related and re-enable
+TEST(RustLogIntegrationTestWithoutMocking, DISABLED_Panic) {
+  std::string expected_msg;
+
+  // Verify presence of `LOG(FATAL)`-specific prefix in the message.
+  expected_msg += "\\bFATAL\\b.*base.logging.rust_logger.test_support.rs";
+  expected_msg += "[\\s\\S]*";  // Skip over a newline
+
+  // Verify presence of Rust-provided, generic panicking message
+  expected_msg += "panicked at.*base.logging.rust_logger.test_support.rs";
+  expected_msg += "[\\s\\S]*";  // Skip over a newline
+
+  // Verify presence of the custom message passed to `panic!` (including the
+  // placeholder).
+  expected_msg += "panic with placeholder 123";
+
+  BASE_EXPECT_DEATH(
+      { base::test::panic_with_placeholder_from_rust(123); }, expected_msg);
+}
+
+}  // namespace
+}  // namespace base::test

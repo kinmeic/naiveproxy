@@ -1,0 +1,113 @@
+// Copyright 2018 The Chromium Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+#include "base/fuchsia/mem_buffer_util.h"
+
+#include <lib/zx/vmo.h>
+
+#include <string>
+#include <string_view>
+#include <utility>
+
+#include "base/fuchsia/fuchsia_logging.h"
+#include "base/strings/utf_string_conversions.h"
+
+namespace base {
+
+std::optional<std::u16string> ReadUTF8FromVMOAsUTF16(
+    const fuchsia::mem::Buffer& buffer) {
+  std::optional<std::string> output_utf8 = StringFromMemBuffer(buffer);
+  if (!output_utf8) {
+    return std::nullopt;
+  }
+  std::u16string output;
+  return UTF8ToUTF16(output_utf8->data(), output_utf8->size(), &output)
+             ? std::optional<std::u16string>(std::move(output))
+             : std::nullopt;
+}
+
+zx::vmo VmoFromString(std::string_view data, std::string_view name) {
+  zx::vmo vmo;
+
+  // The `ZX_PROP_VMO_CONTENT_SIZE` property is automatically set on VMO
+  // creation.
+  zx_status_t status = zx::vmo::create(data.size(), 0, &vmo);
+  ZX_CHECK(status == ZX_OK, status) << "zx_vmo_create";
+  status = vmo.set_property(ZX_PROP_NAME, name.data(), name.size());
+  ZX_DCHECK(status == ZX_OK, status);
+  if (data.size() > 0) {
+    status = vmo.write(data.data(), 0, data.size());
+    ZX_CHECK(status == ZX_OK, status) << "zx_vmo_write";
+  }
+  return vmo;
+}
+
+fuchsia::mem::Buffer MemBufferFromString(std::string_view data,
+                                         std::string_view name) {
+  fuchsia::mem::Buffer buffer;
+  buffer.vmo = VmoFromString(data, name);
+  buffer.size = data.size();
+  return buffer;
+}
+
+std::optional<std::string> StringFromVmo(const zx::vmo& vmo) {
+  std::string result;
+
+  size_t size;
+  zx_status_t status = vmo.get_prop_content_size(&size);
+  if (status != ZX_OK) {
+    ZX_LOG(ERROR, status) << "zx::vmo::get_prop_content_size";
+    return std::nullopt;
+  }
+
+  if (size == 0) {
+    return result;
+  }
+
+  result.resize(size);
+  status = vmo.read(&result[0], 0, size);
+  if (status == ZX_OK) {
+    return result;
+  }
+
+  ZX_LOG(ERROR, status) << "zx_vmo_read";
+  return std::nullopt;
+}
+
+std::optional<std::string> StringFromMemBuffer(
+    const fuchsia::mem::Buffer& buffer) {
+  std::string result;
+
+  if (buffer.size == 0) {
+    return result;
+  }
+
+  result.resize(buffer.size);
+  zx_status_t status = buffer.vmo.read(&result[0], 0, buffer.size);
+  if (status == ZX_OK) {
+    return result;
+  }
+
+  ZX_LOG(ERROR, status) << "zx_vmo_read";
+  return std::nullopt;
+}
+
+std::optional<std::string> StringFromMemData(const fuchsia::mem::Data& data) {
+  switch (data.Which()) {
+    case fuchsia::mem::Data::kBytes: {
+      const std::vector<uint8_t>& bytes = data.bytes();
+      return std::string(bytes.begin(), bytes.end());
+    }
+    case fuchsia::mem::Data::kBuffer:
+      return StringFromMemBuffer(data.buffer());
+    case fuchsia::mem::Data::kUnknown:
+    case fuchsia::mem::Data::Invalid:
+      // TODO(fxbug.dev/66155): Determine whether to use a default case instead.
+      break;
+  }
+
+  return std::nullopt;
+}
+
+}  // namespace base

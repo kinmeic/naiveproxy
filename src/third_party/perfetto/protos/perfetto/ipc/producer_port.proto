@@ -1,0 +1,482 @@
+/*
+ * Copyright (C) 2017 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+syntax = "proto2";
+
+import "protos/perfetto/common/commit_data_request.proto";
+import "protos/perfetto/config/data_source_config.proto";
+import "protos/perfetto/common/data_source_descriptor.proto";
+
+package perfetto.protos;
+
+// IPC interface definition for the producer port of the tracing service.
+service ProducerPort {
+  // Called once only after establishing the connection with the Service.
+  // The service replies sending the shared memory file descriptor in reply.
+  rpc InitializeConnection(InitializeConnectionRequest)
+      returns (InitializeConnectionResponse) {}
+
+  // Advertises a new data source.
+  rpc RegisterDataSource(RegisterDataSourceRequest)
+      returns (RegisterDataSourceResponse) {}
+
+  // Unregisters a previously registered data source.
+  rpc UnregisterDataSource(UnregisterDataSourceRequest)
+      returns (UnregisterDataSourceResponse) {}
+
+  // Sent by the client to request the service to:
+  // 1) Move some chunks from the shmem buffer into the logging buffer.
+  // 2) Patch the content of some chunks previously moved.
+  // 3) Acknowledge a Flush() request.
+  rpc CommitData(protos.CommitDataRequest) returns (CommitDataResponse) {}
+
+  // This is a backchannel to get asynchronous commands / notifications back
+  // from the Service.
+  rpc GetAsyncCommand(GetAsyncCommandRequest)
+      returns (stream GetAsyncCommandResponse) {}
+
+  // ----------------------------------------------------
+  // All methods below have been introduced in Android Q.
+  // ----------------------------------------------------
+
+  // Associates a trace writer with its target buffer.
+  rpc RegisterTraceWriter(RegisterTraceWriterRequest)
+      returns (RegisterTraceWriterResponse) {}
+
+  // Removes a trace writer association previously added by
+  // RegisterTraceWriter.
+  rpc UnregisterTraceWriter(UnregisterTraceWriterRequest)
+      returns (UnregisterTraceWriterResponse) {}
+
+  // Sent by the client in response to a StartDataSource message, when a data
+  // source is successfully started. This is expected only for data sources that
+  // set the DataSourceDescriptor.will_notify_on_start flag when registering.
+  rpc NotifyDataSourceStarted(NotifyDataSourceStartedRequest)
+      returns (NotifyDataSourceStartedResponse) {}
+
+  // Sent by the client in response to a StopDataSource message, when a data
+  // source is successfully stopped. This is expected only for data sources that
+  // set the DataSourceDescriptor.will_notify_on_stop flag when registering.
+  rpc NotifyDataSourceStopped(NotifyDataSourceStoppedRequest)
+      returns (NotifyDataSourceStoppedResponse) {}
+
+  // Sent by the client to request the service to:
+  // 1) Find all sessions which define these triggers
+  // 2) Perform an action as defined in those sessions configs.
+  rpc ActivateTriggers(ActivateTriggersRequest)
+      returns (ActivateTriggersResponse) {}
+
+  // ----------------------------------------------------
+  // All methods below have been introduced in Android R.
+  // ----------------------------------------------------
+
+  // This is used to linearize the producer with the service and to guarantee
+  // that all IPCs prior to this call have been seen and processed by the
+  // service. Example:
+  //   - RegisterDataSource(A)
+  //   - RegisterDataSource(B)
+  //   - Sync()
+  // When the Sync() response is received, the producer is guaranteed that the
+  // service has seen both data source registrations.
+  rpc Sync(SyncRequest) returns (SyncResponse) {}
+
+  // ----------------------------------------------------
+  // All methods below have been introduced in Android T.
+  // ----------------------------------------------------
+
+  // Updates the data source descriptor for an already-registered data source.
+  // This can be used to update the list of features supported.
+  // Only the data source with a matching data_source_descriptor.id is updated.
+  // The data_source_descriptor.name cannot be changed.
+  rpc UpdateDataSource(UpdateDataSourceRequest)
+      returns (UpdateDataSourceResponse) {}
+
+  // ----------------------------------------------------
+  // All methods below are introduced in v59.
+  // They are experimental and subject to change.
+  // ----------------------------------------------------
+
+  // Example tracing v2 flow over IPC. Time runs from top to bottom.
+  // This connection supports both v1 and v2. Writers can publish before the
+  // service replies to AttachV2RingBuffer.
+  // - "--->" is an IPC message.
+  // - "***>" is a change in shared memory, with no message.
+  //
+  //   producer (ProducerIPCClientImpl)           service (ProducerIPCService)
+  //      |                                                  |
+  //   1. | InitializeConnection                             |
+  //      |   supported_protocol_abi_versions = V1|V2 ------>| finds all
+  //      |<------------- protocol_abi_versions = V1|V2      | common versions
+  //      |                                                  |
+  //   2. |<------------- SetupDataSource (GetAsyncCommand)  |
+  //      |   DataSourceConfig.supports_tracing_v2 = true    |
+  //      |   (only with v2 and a TBv2 target buffer)        |
+  //      |                                                  |
+  //   3. | AttachV2RingBuffer                               |
+  //      |   chunk_size_bytes, sealed memfd --------------->| maps, checks,
+  //      |                                                  | installs reader,
+  //      |                                                  | drains once
+  //      |<------------------------- attachment accepted    |
+  //      |                                                  |
+  //   4. | writers publish chunks                           |
+  //      |*********************** ring buffer *************>|
+  //      | DrainV2RingBuffer (no reply) ------------------->| runs one pass
+  //      |                                                  |
+  //   5. | CommitData (flush ack), or                       |
+  //      | NotifyDataSourceStopped ------------------------>| handles the
+  //      |                                                  | later request
+  //
+  // InitializeConnection returns the common ABIs. See its request and response
+  // fields for compatibility rules. A connection without memfd support or
+  // with shared memory emulation cannot use v2.
+  //
+  // SetupDataSource permits v2 only for a TraceBufferV2 target on a connection
+  // that supports v2. The writer must use a common ABI permitted by the config
+  // and target buffer. See DataSourceConfig.supports_tracing_v2.
+  //
+  // Writers publish chunks through shared memory. The producer combines drain
+  // notifications instead of sending a CommitData IPC for each chunk.
+  // The service also drains when a flush completes, when tracing stops and on
+  // disconnect.
+  //
+  // The producer sends a drain request before a flush acknowledgement or stop
+  // notification. The service handles these requests in order, so the initial
+  // drain pass runs first. A delayed retry can run after the later request.
+  //
+  // Attaches one ring buffer per producer connection, shared by all its tracing
+  // sessions. The request carries the chunk size and an out-of-band sealed
+  // memfd. The service maps the memfd and installs a reader. Each peer owns its
+  // own mapping.
+  //
+  // The service rejects the request if:
+  // - v2 is not in the connection's common ABI mask,
+  // - the memfd is missing, unsealed, empty or larger than kMaxShmSize,
+  // - the mapping size and chunk_size_bytes do not form a valid layout, or
+  // - a ring buffer is already attached to this connection.
+  //
+  // A rejection leaves the connection and any existing attachment unchanged.
+  // The service releases the mapping supplied by the rejected request.
+  // If no ring buffer is attached, the producer can retry with a valid mapping.
+  rpc AttachV2RingBuffer(AttachV2RingBufferRequest)
+      returns (AttachV2RingBufferResponse) {}
+
+  // The producer asks the service to read its tracing v2 ring buffer.
+  rpc DrainV2RingBuffer(DrainV2RingBufferRequest)
+      returns (DrainV2RingBufferResponse) {}
+}
+
+// A shared memory layout and the operations that send its data to the service.
+// The versions are independent: v2 does not imply v1. The producer sends a
+// bitmask of its versions in InitializeConnectionRequest. The service returns
+// the bitmask of common versions. This exchange does not select a writer for
+// an instance.
+//
+// Each value is a single bit, so a uint32 mask holds a set of versions.
+// A new version must take the next unused bit: 4, then 8.
+//
+// Keep in sync with ProtocolAbiVersion in
+// include/perfetto/ext/tracing/core/tracing_service.h, which describes each
+// version in detail.
+enum ProtocolAbiVersion {
+  // Reserved. Do not advertise this value.
+  PROTOCOL_ABI_VERSION_UNSPECIFIED = 0;
+
+  // The original protocol: a shared memory buffer (SMB) of pages and chunks,
+  // with CommitData IPCs and patches.
+  // Docs: https://perfetto.dev/docs/design-docs/api-and-abi#shmem-abi.
+  PROTOCOL_ABI_VERSION_V1 = 1;
+
+  // Tracing v2: a ring buffer that the producer allocates, shared with
+  // AttachV2RingBuffer and read on DrainV2RingBuffer.
+  // It is experimental and its ABI is not stable yet.
+  // Design: RFC-0014, https://github.com/google/perfetto/discussions/4508.
+  PROTOCOL_ABI_VERSION_V2 = 2;
+}
+
+// Arguments for rpc InitializeConnection().
+message InitializeConnectionRequest {
+  // Optional. Provides a hint to the tracing service about the suggested size
+  // of the shared memory buffer pages. The service is not required to respect
+  // this if it has already another value in the configuration or if the hint
+  // is unreasonably large. Must be an integer multiple of 4096. See tradeoff
+  // considerations in shared_memory_abi.h.
+  optional uint32 shared_memory_page_size_hint_bytes = 1;
+
+  // Optional. Provides a hint to the tracing service about the suggested size
+  // of the shared memory buffer. The service is not required to respect this
+  // and might return a smaller buffer.
+  optional uint32 shared_memory_size_hint_bytes = 2;
+
+  // Required to match the producer config set by the service to the correct
+  // producer.
+  optional string producer_name = 3;
+
+  enum ProducerSMBScrapingMode {
+    // Use the service's default setting for SMB scraping.
+    SMB_SCRAPING_UNSPECIFIED = 0;
+
+    // Enable scraping of uncommitted chunks from the producer's shared memory
+    // buffer.
+    SMB_SCRAPING_ENABLED = 1;
+
+    // Disable scraping of uncommitted chunks from the producer's shared memory
+    // buffer.
+    SMB_SCRAPING_DISABLED = 2;
+  }
+
+  // If provided, overrides the service's SMB scraping setting for the producer.
+  optional ProducerSMBScrapingMode smb_scraping_mode = 4;
+
+  // Was build_flags = BUILD_FLAGS_DCHECKS_ON|OFF. It was used to emit an error
+  // when DCHECKs level didn't match between service and producer (in turn that
+  // would crash the service when applying patches).
+  // Removed in v20 as part of b/197340286.
+  reserved 5;
+
+  // ---------------------------------------------------
+  // All fields below have been introduced in Android R.
+  // ---------------------------------------------------
+
+  // Since Android R, this request can also transport an FD for the producer's
+  // shared memory buffer, if allocated by the producer (e.g. for startup
+  // tracing). In this case, |shared_memory_page_size_hint_bytes| is a required
+  // field, and describes the SMB's page size. Note that the service may not
+  // accept this SMB (e.g. because it is too old or its size / page size are
+  // invalid) and instead allocate a new SMB which is provided in the
+  // SetupTracing response. See TracingService::ConnectProducer() and
+  // |using_shmem_provided_by_producer| in InitializeConnectionResponse.
+  optional bool producer_provided_shmem = 6;
+
+  // ---------------------------------------------------
+  // All fields below have been introduced in Android S.
+  // ---------------------------------------------------
+
+  // The version of the client library used by the producer.
+  // This is a human readable string with and its format varies depending on
+  // the build system that is used to build the code and the repo (standalone
+  // vs AOSP). This is intended for human debugging only.
+  optional string sdk_version = 8;
+
+  // On Windows, when producer_provided_shmem = true, the client creates a named
+  // SHM region and passes the name (an unguessable token) back to the service.
+  // Introduced in v13.
+  optional string shm_key_windows = 7;
+
+  // Bitmask of the ProtocolAbiVersion values that the producer supports.
+  // The service returns those it supports too, and ignores unknown bits.
+  // 0 or absent, as from an old producer, means v1 only.
+  // Introduced in v59.
+  optional uint32 supported_protocol_abi_versions = 9;
+}
+
+message InitializeConnectionResponse {
+  // Indicates whether the service accepted the SMB provided by the producer in
+  // InitializeConnectionRequest (if any). If false, the shared memory buffer FD
+  // will provided by the service via the SetupTracing async command.
+  optional bool using_shmem_provided_by_producer = 1;
+
+  // Indicates to the producer that the service allows direct SMB patching of
+  // chunks that have not yet been committed to it.
+  // This field has been introduced in Android S.
+  optional bool direct_smb_patching_supported = 2;
+
+  // Indicates whether the service would like to use SMB emulation for the
+  // connection, and request the client to send chunk data over the socket e.g.
+  // for remote connection from a VM guest.
+  optional bool use_shmem_emulation = 3;
+
+  // Bitmask of the versions in supported_protocol_abi_versions that the
+  // service also supports on this connection.
+  // - No common version: the service rejects InitializeConnection.
+  // - 0 or absent, as from an old service: v1 only, not an empty common set.
+  // - A version that the producer did not offer: the producer disconnects.
+  //   This includes an old service when the producer did not offer v1.
+  // The mask stays fixed for the connection. It does not select a writer.
+  // Introduced in v59.
+  optional uint32 protocol_abi_versions = 4;
+}
+
+// Arguments for rpc AttachV2RingBuffer().
+// - The IPC layer sends the ring buffer's file descriptor, a sealed memfd,
+//   with this request. Without it, the service rejects the request.
+// - The service takes the ring buffer size from the memfd. The request has
+//   no size field.
+message AttachV2RingBufferRequest {
+  // Bytes per chunk in the shared memory. The service rejects the ring buffer
+  // if the size and this value give no valid layout.
+  optional uint32 chunk_size_bytes = 1;
+}
+
+// The service sends it if it attached the ring buffer, and rejects the
+// request otherwise.
+message AttachV2RingBufferResponse {}
+
+// Arguments for rpc DrainV2RingBuffer().
+message DrainV2RingBufferRequest {}
+
+// The IPC schema requires a response type. The service never sends it.
+message DrainV2RingBufferResponse {}
+
+// Arguments for rpc RegisterDataSource().
+message RegisterDataSourceRequest {
+  optional protos.DataSourceDescriptor data_source_descriptor = 1;
+}
+
+message RegisterDataSourceResponse {
+  // Only set in case of errors, when |data_source_id| == 0.
+  optional string error = 1;
+};
+
+// Arguments for rpc UpdateDataSource().
+message UpdateDataSourceRequest {
+  // The new data_source_descriptor.{id, name} must match {id, name} of a
+  // data source previously registered via RegisterDataSource().
+  optional protos.DataSourceDescriptor data_source_descriptor = 1;
+}
+
+message UpdateDataSourceResponse {};
+
+// Arguments for rpc UnregisterDataSource().
+message UnregisterDataSourceRequest {
+  // The name of the data source to unregister, as previously passed in
+  // |RegisterDataSourceRequest.name|.
+  optional string data_source_name = 1;
+}
+
+message UnregisterDataSourceResponse {}
+
+// Arguments for rpc RegisterTraceWriter().
+message RegisterTraceWriterRequest {
+  // The ID of a producer's trace writer.
+  optional uint32 trace_writer_id = 1;
+
+  // The ID of the target buffer that the trace writer commits its chunks to.
+  optional uint32 target_buffer = 2;
+}
+
+message RegisterTraceWriterResponse {}
+
+// Arguments for rpc UnregisterTraceWriter().
+message UnregisterTraceWriterRequest {
+  // The ID of a producer's trace writer.
+  optional uint32 trace_writer_id = 1;
+}
+
+message UnregisterTraceWriterResponse {}
+
+// Arguments for rpc CommitData().
+// See commit_data_request.proto for CommitDataRequest. That has its own file
+// because it is used also as input to generate C++ classes (xxx.gen.h).
+message CommitDataResponse {}
+
+// Arguments for rpc NotifyDataSourceStarted().
+message NotifyDataSourceStartedRequest {
+  // ID of the data source that has successfully started.
+  optional uint64 data_source_id = 1;
+}
+
+message NotifyDataSourceStartedResponse {}
+
+// Arguments for rpc NotifyDataSourceStopped().
+message NotifyDataSourceStoppedRequest {
+  // ID of the data source that has successfully stopped.
+  optional uint64 data_source_id = 1;
+}
+
+message NotifyDataSourceStoppedResponse {}
+
+// Arguments for rpc ActivateTriggersRequest().
+message ActivateTriggersRequest {
+  repeated string trigger_names = 1;
+}
+
+message ActivateTriggersResponse {}
+
+// Arguments for rpc GetAsyncCommand().
+message GetAsyncCommandRequest {}
+
+message GetAsyncCommandResponse {
+  // Called after SetupTracing and before StartDataSource.
+  // This message was introduced in Android Q.
+  message SetupDataSource {
+    optional uint64 new_instance_id = 1;
+    optional protos.DataSourceConfig config = 2;
+  }
+
+  message StartDataSource {
+    optional uint64 new_instance_id = 1;
+
+    // For backwards compat reasons (with Android P), the config passed here
+    // is identical to the one passed to SetupDataSource.config.
+    optional protos.DataSourceConfig config = 2;
+  }
+
+  message StopDataSource {
+    optional uint64 instance_id = 1;
+  }
+
+  // On Android/Linux/Mac this message also transports the file descriptor for
+  // the shared memory buffer (not a proto field).
+  message SetupTracing {
+    optional uint32 shared_buffer_page_size_kb = 1;
+
+    // On Windows, instead, we pass the name (an unguessable token) of a shared
+    // memory region that can be attached by the other process by name.
+    // Introduced in v13.
+    optional string shm_key_windows = 2;
+  }
+
+  message Flush {
+    // The instance id (i.e. StartDataSource.new_instance_id) of the data
+    // sources to flush.
+    repeated uint64 data_source_ids = 1;
+
+    // A monotonic counter generated by the service. The producer is simply
+    // expected to copy this value back into the CommitDataRequest, so the
+    // service can tell when the data for this flush has been committed.
+    optional uint64 request_id = 2;
+
+    // More details such as flush reason and originator. Introduced in v38 / V.
+    // See FlushFlags in include/perfetto/ext/tracing/core/flush_flags.h.
+    optional uint64 flags = 3;
+  }
+
+  // Instructs the given data sources to stop referring to any trace contents
+  // emitted so far. Sent only to active data sources that set
+  // |handles_incremental_state_clear| in their DataSourceDescriptor.
+  //
+  // Added to perfetto tree in May 2019.
+  message ClearIncrementalState {
+    // The instance id (i.e. StartDataSource.new_instance_id) of the data
+    // sources that should clear their incremental state.
+    repeated uint64 data_source_ids = 1;
+  }
+
+  // Next id: 8.
+  oneof cmd {
+    SetupTracing setup_tracing = 3;
+    SetupDataSource setup_data_source = 6;
+    StartDataSource start_data_source = 1;
+    StopDataSource stop_data_source = 2;
+    // id == 4 was teardown_tracing, never implemented.
+    Flush flush = 5;
+    ClearIncrementalState clear_incremental_state = 7;
+  }
+}
+
+// Arguments for rpc Sync().
+message SyncRequest {}
+message SyncResponse {}

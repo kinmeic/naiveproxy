@@ -1,0 +1,53 @@
+<!--
+Copyright 2026 The Chromium Authors
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+-->
+
+<!--
+This file describes the enumerations referenced by entries in histograms.xml for
+this directory.
+
+For best practices on writing enumerations descriptions, see
+https://chromium.googlesource.com/chromium/src.git/+/HEAD/tools/metrics/histograms/README.md#Enum-Histograms
+-->
+
+<histogram-configuration>
+
+<!-- Enum types -->
+
+<enums>
+
+<!-- LINT.IfChange(ResourceBrokerLifecycleEvent) -->
+
+<enum name="ResourceBrokerLifecycleEvent">
+  <int value="0" label="Launched"/>
+  <int value="1" label="DisabledDueToCrashLoop"/>
+</enum>
+
+<!-- LINT.ThenChange(//content/browser/resource_broker/resource_broker_host.h:ResourceBrokerLifecycleEvent) -->
+
+<!-- LINT.IfChange(ResourceBrokerRoutingDecision) -->
+
+<enum name="ResourceBrokerRoutingDecision">
+  <int value="0" label="Routed"/>
+  <int value="1" label="ErrorPage"/>
+  <int value="2" label="OpaqueOrigin"/>
+  <int value="3" label="WebUI"/>
+  <int value="4" label="Extension"/>
+  <int value="5" label="IsolatedWebApp"/>
+  <int value="6" label="SchemeNotHttpOrHttps"/>
+  <int value="7" label="NotLockedToSite"/>
+  <int value="8" label="Pdf"/>
+  <int value="9" label="Guest"/>
+  <int value="10" label="Privileged"/>
+  <int value="11" label="CrossOriginIsolated"/>
+  <int value="12" label="ServiceWorkerControlled"/>
+  <int value="13" label="NoncePartitioned"/>
+</enum>
+
+<!-- LINT.ThenChange(//content/browser/resource_broker/resource_broker_routing.h:ResourceBrokerRoutingDecision) -->
+
+</enums>
+
+</histogram-configuration>

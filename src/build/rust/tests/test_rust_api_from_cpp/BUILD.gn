@@ -1,0 +1,110 @@
+# Copyright 2022 The Chromium Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+import("//build/rust/rust_api_from_cpp.gni")
+import("//build/rust/rust_static_library.gni")
+
+group("test_rust_api_from_cpp") {
+  testonly = true
+  deps = [
+    ":rust_api_from_cpp_unittests",
+    "extra_rust_sources:rust_unittests",
+    "forward_declare:rust_unittests",
+    "lifetimes:rust_unittests",
+    "round_trip:cpp_unittests",
+    "round_trip:rust_unittests",
+    "std:rust_unittests",
+  ]
+}
+
+rust_static_library("rust_api_from_cpp_unittests") {
+  testonly = true
+  is_gtest_unittests = true
+  crate_root = "tests.rs"
+  sources = [ crate_root ]
+  deps = [
+    ":self_contained_target_rs_api",
+    ":target_depending_on_another_rs_api",
+    ":test_browsing_instance_id_rs_api",
+    ":test_root_namespaces_rs_api",
+    "//testing/rust_gtest_interop",
+  ]
+}
+
+rust_api_from_cpp("self_contained_target_rs_api") {
+  # This is the target that the bindings are for / call into.
+  bindings_target = ":self_contained_target"
+
+  # Lists public headers from `sources` of `self_contained_target`.
+  public_headers = [
+    "self_contained_target_header1.h",
+    "self_contained_target_header2.h",
+  ]
+
+  # Lets Rust code write `self_contained_target_rs_api::AddViaCc` instead of
+  # `self_contained_target_rs_api::test_ns::AddViaCc`.
+  root_namespaces = [ "test_ns" ]
+}
+
+source_set("self_contained_target") {
+  sources = [
+    "self_contained_target_header1.h",
+    "self_contained_target_header2.cc",
+    "self_contained_target_header2.h",
+  ]
+}
+
+rust_api_from_cpp("target_depending_on_another_rs_api") {
+  # This is the target that the bindings are for / call into.
+  bindings_target = ":target_depending_on_another"
+
+  # Lists public headers from `sources` of `target_depending_on_another`.
+  #
+  # TODO(crbug.com/40215214): Is there something we can do (a convention?) to
+  # avoid this duplication/repetition?
+  public_headers = [ "target_depending_on_another.h" ]
+
+  # Parallels `public_deps` of `target_depending_on_another`
+  #
+  # TODO(crbug.com/40215214): Is there something we can do (a convention?) to
+  # avoid this duplication/repetition?
+  bindings_deps = [ ":self_contained_target_rs_api" ]
+
+  root_namespaces = [ "test_ns" ]
+}
+
+source_set("target_depending_on_another") {
+  sources = [ "target_depending_on_another.h" ]
+  public_deps = [ ":self_contained_target" ]
+}
+
+rust_api_from_cpp("test_browsing_instance_id_rs_api") {
+  bindings_target = ":test_browsing_instance_id"
+  public_headers = [ "test_browsing_instance_id.h" ]
+
+  # Crubit can only instantiate class templates (e.g. `base::IdType32<...>`)
+  # that come from headers covered by Crubit-enabled bindings.
+  bindings_deps = [ "//base:base_rs_api" ]
+}
+
+source_set("test_browsing_instance_id") {
+  sources = [ "test_browsing_instance_id.h" ]
+  public_deps = [ "//base" ]
+}
+
+rust_api_from_cpp("test_root_namespaces_rs_api") {
+  bindings_target = ":test_root_namespaces"
+  public_headers = [ "test_root_namespaces.h" ]
+
+  # Re-exports items from the `test_outer::test_inner` and `test_other` C++
+  # namespaces at the root of the generated crate.
+  root_namespaces = [
+    "test_outer::test_inner",
+    "test_other",
+  ]
+}
+
+source_set("test_root_namespaces") {
+  sources = [ "test_root_namespaces.h" ]
+}

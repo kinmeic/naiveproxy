@@ -1,0 +1,58 @@
+<!--
+Copyright 2026 The Chromium Authors
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+-->
+
+<!--
+This file is used to generate a comprehensive list of Resource Broker histograms
+along with a detailed description for each histogram.
+
+For best practices on writing histogram descriptions, see
+https://chromium.googlesource.com/chromium/src.git/+/HEAD/tools/metrics/histograms/README.md
+-->
+
+<histogram-configuration>
+
+<histograms>
+
+<histogram name="ResourceBroker.LifecycleEvent"
+    enum="ResourceBrokerLifecycleEvent" expires_after="2027-07-12">
+  <owner>aattar@google.com</owner>
+  <owner>catan-team@chromium.org</owner>
+  <summary>
+    Recorded when discrete Resource Broker lifecycle milestones occur in the
+    browser process: when the service is initially launched, and when the
+    service is permanently disabled for the session due to a rapid crash loop (3
+    or more crashes within 10 minutes).
+  </summary>
+</histogram>
+
+<histogram name="ResourceBroker.RoutingDecision{FrameType}"
+    enum="ResourceBrokerRoutingDecision" expires_after="2027-07-12">
+  <owner>aattar@google.com</owner>
+  <owner>catan-team@chromium.org</owner>
+  <summary>
+    Whether a subresource URLLoaderFactory is eligible for routing through the
+    Cross-Renderer Resource Broker and, if not, the first reason it was
+    excluded. Recorded once per untrusted, network-backed subresource factory
+    created for a document {FrameType} while the ResourceBroker feature is
+    enabled; non-network factories (e.g. data:/file:/filesystem: scheme handlers
+    or WebUI with bindings) and browser-trusted factories (e.g. cross-origin
+    prefetch) are not counted. Counts factories, not documents: a document can
+    create several (e.g. for isolated worlds or factory updates), and a new
+    tab's initial empty document also creates one (OpaqueOrigin in .MainFrame).
+    Where strict site isolation is not enabled (notably on Android), unisolated
+    sites share unlocked processes and report NotLockedToSite.
+  </summary>
+  <token key="FrameType">
+    <variant name="" summary="in any frame"/>
+    <variant name=".MainFrame"
+        summary="in a main frame that is not embedded in another document"/>
+    <variant name=".Subframe" summary="in an iframe or guest view"/>
+  </token>
+</histogram>
+
+</histograms>
+
+</histogram-configuration>

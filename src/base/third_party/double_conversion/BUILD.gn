@@ -1,0 +1,39 @@
+# Copyright 2019 The Chromium Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+config("config") {
+  visibility = [ ":double_conversion" ]
+
+  cflags = [
+    "-Wno-unused-const-variable",
+    "-Wno-unused-function",
+  ]
+}
+
+static_library("double_conversion") {
+  sources = [
+    "src/double-conversion/bignum-dtoa.cc",
+    "src/double-conversion/bignum-dtoa.h",
+    "src/double-conversion/bignum.cc",
+    "src/double-conversion/bignum.h",
+    "src/double-conversion/cached-powers.cc",
+    "src/double-conversion/cached-powers.h",
+    "src/double-conversion/diy-fp.h",
+    "src/double-conversion/double-conversion.h",
+    "src/double-conversion/double-to-string.cc",
+    "src/double-conversion/double-to-string.h",
+    "src/double-conversion/fast-dtoa.cc",
+    "src/double-conversion/fast-dtoa.h",
+    "src/double-conversion/fixed-dtoa.cc",
+    "src/double-conversion/fixed-dtoa.h",
+    "src/double-conversion/ieee.h",
+    "src/double-conversion/string-to-double.cc",
+    "src/double-conversion/string-to-double.h",
+    "src/double-conversion/strtod.cc",
+    "src/double-conversion/strtod.h",
+    "src/double-conversion/utils.h",
+  ]
+
+  configs += [ ":config" ]
+}

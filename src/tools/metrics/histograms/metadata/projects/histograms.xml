@@ -1,0 +1,56 @@
+<!--
+Copyright 2026 The Chromium Authors
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+-->
+
+<!--
+This file is used to generate a comprehensive list of projects histograms along
+with a detailed description for each histogram.
+
+For best practices on writing histogram descriptions, see
+https://chromium.googlesource.com/chromium/src.git/+/HEAD/tools/metrics/histograms/README.md
+
+Please follow the instructions in the OWNERS file in this directory to find a
+reviewer.
+-->
+
+<histogram-configuration>
+
+<histograms>
+
+<!-- LINT.IfChange(OrganizerPanelAnimations) -->
+
+<variants name="OrganizerPanelAnimation">
+  <variant name="Hide" summary="Hide the organizer panel"/>
+  <variant name="Show" summary="Show the organizer panel"/>
+</variants>
+
+<!-- LINT.ThenChange(//chrome/browser/ui/views/animations/organizer_panel_animations.cc:OrganizerPanelAnimations) -->
+
+<histogram name="Projects.ProjectsPanel.{OrganizerPanelAnimation}.AnimationFPS"
+    units="fps" expires_after="2027-02-07">
+  <owner>dfried@chromium.org</owner>
+  <owner>top-chrome-desktop-ui@google.com</owner>
+  <summary>
+    Records the frames per second for the organizer panel animation. This is
+    recorded after organizer panel animation is completed.
+  </summary>
+  <token key="OrganizerPanelAnimation" variants="OrganizerPanelAnimation"/>
+</histogram>
+
+<histogram
+    name="Projects.ProjectsPanel.{OrganizerPanelAnimation}.TimeOfLongestAnimationStep"
+    units="ms" expires_after="2027-02-07">
+  <owner>dfried@chromium.org</owner>
+  <owner>top-chrome-desktop-ui@google.com</owner>
+  <summary>
+    Records the length of the longest step in an organizer panel animation. This
+    is recorded after organizer panel animation is completed.
+  </summary>
+  <token key="OrganizerPanelAnimation" variants="OrganizerPanelAnimation"/>
+</histogram>
+
+</histograms>
+
+</histogram-configuration>

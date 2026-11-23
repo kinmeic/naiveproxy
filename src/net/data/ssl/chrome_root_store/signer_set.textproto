@@ -1,0 +1,220 @@
+timestamp: {
+  seconds: 1793289600
+}
+version: "3.0.0"
+compatibility_version: 1
+operators: {
+  name: "mtcs.dev Test CA Operator"
+  email: "mtc-ca@mtcs.dev"
+}
+operators: {
+  name: "mtcs.dev Test Mirror Operator"
+  email: "mtc-mirror@mtcs.dev"
+}
+operators: {
+  name: "TrustAsia"
+  email: "mtc@trustasia.com"
+}
+operators: {
+  name: "Geomys"
+  email: "mtc@geomys.org"
+}
+operators: {
+  name: "DigiCert, Inc."
+  email: "plants.labs@digicert.com"
+}
+issuers: {
+  friendly_name: "mtcs.dev Test CA 1"
+  base_id: "11129.11.99.1"
+  state_history: {
+    state: STATE_USABLE
+    state_start: {
+      seconds: 1783375200
+    }
+  }
+  operator_history: {
+    name: "mtcs.dev Test CA Operator"
+    operator_start: {
+      seconds: 1783375200
+    }
+  }
+  base_url: "https://ca1.test.mtcs.dev"
+  type: SIGNER_TYPE_ISSUER
+  realm: REALM_UNTRUSTED_VALIDATION_ONLY
+  max_cert_lifetime: {
+    seconds: 604800
+  }
+  key_sha256: "2bd288b3912f358a79a5adeaf96b5df984edcf02e01b21613efd0f1864cfc72d"
+  min_log_number: 1
+  signature_algorithm: SIGNATURE_ALGORITHM_ML_DSA44
+  spec_version: SPEC_VERSION_DRAFT05
+}
+issuers: {
+  friendly_name: "TrustAsia Test CA 3"
+  base_id: "44494.3.1.3"
+  state_history: {
+    state: STATE_USABLE
+    state_start: {
+      seconds: 1793289600
+    }
+  }
+  operator_history: {
+    name: "TrustAsia"
+    operator_start: {
+      seconds: 1793289600
+    }
+  }
+  base_url: "https://log.mtc-staging.trustasia.com/44494.3.1.3"
+  type: SIGNER_TYPE_ISSUER
+  realm: REALM_UNTRUSTED_VALIDATION_ONLY
+  max_cert_lifetime: {
+    seconds: 604800
+  }
+  key_sha256: "1ee24d5bd7f8bc65a681fdbfec5d6f0ffa4938ee6987a7b3dba2ad51c8821a9f"
+  crs_root_id: 112
+  min_log_number: 1
+  signature_algorithm: SIGNATURE_ALGORITHM_ML_DSA44
+  spec_version: SPEC_VERSION_DRAFT07
+}
+issuers: {
+  friendly_name: "TrustAsia Test CA 4"
+  base_id: "44494.3.1.4"
+  state_history: {
+    state: STATE_USABLE
+    state_start: {
+      seconds: 1793289600
+    }
+  }
+  operator_history: {
+    name: "TrustAsia"
+    operator_start: {
+      seconds: 1793289600
+    }
+  }
+  base_url: "https://log.mtc-staging.trustasia.com/44494.3.1.4"
+  type: SIGNER_TYPE_ISSUER
+  realm: REALM_UNTRUSTED_VALIDATION_ONLY
+  max_cert_lifetime: {
+    seconds: 4060800
+  }
+  key_sha256: "9b936f69cb8c91672ee00be6263803cba9f3edb8d77c1f050c2f4ac9cf1d5a27"
+  crs_root_id: 113
+  min_log_number: 1
+  signature_algorithm: SIGNATURE_ALGORITHM_ML_DSA44
+  spec_version: SPEC_VERSION_DRAFT07
+}
+issuers: {
+  friendly_name: "DigiCert Test CA 1"
+  base_id: "52580.200109.2.1"
+  state_history: {
+    state: STATE_USABLE
+    state_start: {
+      seconds: 1793289600
+    }
+  }
+  operator_history: {
+    name: "DigiCert, Inc."
+    operator_start: {
+      seconds: 1793289600
+    }
+  }
+  base_url: "https://phase2.mtc.digicert.dev/plants"
+  type: SIGNER_TYPE_ISSUER
+  realm: REALM_UNTRUSTED_VALIDATION_ONLY
+  max_cert_lifetime: {
+    seconds: 604800
+  }
+  key_sha256: "076eb2033f69185f7ac2b4de9595cddfacf747c9fa6dbd20bd432c2fd55ff06e"
+  crs_root_id: 114
+  min_log_number: 3
+  signature_algorithm: SIGNATURE_ALGORITHM_ML_DSA44
+  spec_version: SPEC_VERSION_DRAFT07
+}
+mirrors: {
+  friendly_name: "mtcs.dev Test Mirror 1"
+  base_id: "11129.11.99.2"
+  state_history: {
+    state: STATE_USABLE
+    state_start: {
+      seconds: 1783375200
+    }
+  }
+  operator_history: {
+    name: "mtcs.dev Test Mirror Operator"
+    operator_start: {
+      seconds: 1783375200
+    }
+  }
+  base_url: "https://mirror1.test.mtcs.dev/mirror"
+  type: SIGNER_TYPE_MIRROR
+  realm: REALM_UNTRUSTED_VALIDATION_ONLY
+  key_sha256: "4f0be97b157bae43f89d88afded1b5182b7774f112161cc73def7438afb37ea4"
+  signature_algorithm: SIGNATURE_ALGORITHM_ML_DSA44
+  submission_prefix: "https://mirror1.test.mtcs.dev"
+}
+mirrors: {
+  friendly_name: "TrustAsia Test Mirror 1"
+  base_id: "44494.3.2.1"
+  state_history: {
+    state: STATE_USABLE
+    state_start: {
+      seconds: 1787162400
+    }
+  }
+  operator_history: {
+    name: "TrustAsia"
+    operator_start: {
+      seconds: 1787162400
+    }
+  }
+  base_url: "https://mirror.mtc-staging.trustasia.com/monitoring"
+  type: SIGNER_TYPE_MIRROR
+  realm: REALM_UNTRUSTED_VALIDATION_ONLY
+  key_sha256: "14ec38a7d66589bd60d24aa88194c2ab8ebbf89c817b8ec12802c4bd5de2d6f1"
+  signature_algorithm: SIGNATURE_ALGORITHM_ML_DSA44
+  submission_prefix: "https://mirror.mtc-staging.trustasia.com"
+}
+mirrors: {
+  friendly_name: "Geomys Test Mirror 1"
+  base_id: "66252.128.0"
+  state_history: {
+    state: STATE_USABLE
+    state_start: {
+      seconds: 1787162400
+    }
+  }
+  operator_history: {
+    name: "Geomys"
+    operator_start: {
+      seconds: 1787162400
+    }
+  }
+  base_url: "https://witness.navigli.skylight.geomys.org/mirror/"
+  type: SIGNER_TYPE_MIRROR
+  realm: REALM_UNTRUSTED_VALIDATION_ONLY
+  key_sha256: "ed9b91b23c895a940807816c3c1bca85c28d62959bc349e2b571d2c3ea9e4cce"
+  signature_algorithm: SIGNATURE_ALGORITHM_ML_DSA44
+  submission_prefix: "https://witness.navigli.sunlight.geomys.org/"
+}
+mirrors: {
+  friendly_name: "DigiCert Test Mirror 1"
+  base_id: "52580.200109.2.1000"
+  state_history: {
+    state: STATE_USABLE
+    state_start: {
+      seconds: 1793289600
+    }
+  }
+  operator_history: {
+    name: "DigiCert, Inc."
+    operator_start: {
+      seconds: 1793289600
+    }
+  }
+  base_url: "https://phase2.mtc.digicert.dev/plants/mirror"
+  type: SIGNER_TYPE_MIRROR
+  realm: REALM_UNTRUSTED_VALIDATION_ONLY
+  key_sha256: "ce0c09cb2049bb2e1495526023158e57839df8fbce04ceabd9694480700eaa58"
+  signature_algorithm: SIGNATURE_ALGORITHM_ML_DSA44
+  submission_prefix: "https://phase2.mtc.digicert.dev/plants/mirror"
+}

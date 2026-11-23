@@ -1,0 +1,196 @@
+// Copyright 2024 The Chromium Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+#ifndef CRYPTO_PROCESS_BOUND_STRING_H_
+#define CRYPTO_PROCESS_BOUND_STRING_H_
+
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "base/check.h"
+#include "base/containers/span.h"
+#include "base/gtest_prod_util.h"
+#include "crypto/crypto_export.h"
+#include "crypto/secure_util.h"
+
+namespace crypto {
+
+namespace internal {
+
+// Maybe round the size of the data to a size needed for the encrypt or decrypt
+// operation. Returns the new size, or `size` if no rounding up is needed.
+CRYPTO_EXPORT size_t MaybeRoundUp(size_t size);
+
+// Maybe encrypt a buffer, in place. Returns true if the buffer was successfully
+// encrypted or false if unsupported by the platform or failed to encrypt.
+CRYPTO_EXPORT bool MaybeEncryptBuffer(base::span<uint8_t> buffer);
+
+// Maybe decrypt a buffer, in place. Returns true if the buffer was successfully
+// decrypted or false if unsupported by the platform or failed to decrypt.
+CRYPTO_EXPORT bool MaybeDecryptBuffer(base::span<uint8_t> buffer);
+}  // namespace internal
+
+// SecureAllocator is used by the SecureString variants below to clear the
+// memory when the string moves out of scope.
+template <typename T>
+struct CRYPTO_EXPORT SecureAllocator {
+  using value_type = T;
+
+  SecureAllocator() noexcept = default;
+
+  T* allocate(std::size_t n) { return std::allocator<T>().allocate(n); }
+
+  void deallocate(T* p, std::size_t n) noexcept {
+    if (p) {
+      // SAFETY: deallocate() has a fixed prototype from the std library, and
+      // passes an unsafe buffer, so convert it to a base::span here.
+      SecureZeroBuffer(UNSAFE_BUFFERS(
+          base::span<uint8_t>(reinterpret_cast<uint8_t*>(p), n * sizeof(T))));
+      std::allocator<T>().deallocate(p, n);
+    }
+  }
+};
+
+// On supported platforms, a process bound string cannot have its content read
+// by other processes on the system. On unsupported platforms it provides no
+// difference over a native string except it does more copies.
+template <typename StringType>
+class CRYPTO_EXPORT ProcessBound {
+ public:
+  using CharType = typename StringType::value_type;
+  using SecureStringType = std::basic_string<CharType,
+                                             std::char_traits<CharType>,
+                                             SecureAllocator<CharType>>;
+
+  ProcessBound() = default;
+
+  ProcessBound(const ProcessBound& other) = default;
+
+  ProcessBound& operator=(const ProcessBound& other) {
+    if (this != &other) {
+      SecureZeroBuffer(base::as_writable_byte_span(maybe_encrypted_data_));
+      maybe_encrypted_data_ = other.maybe_encrypted_data_;
+      original_size_ = other.original_size_;
+      encrypted_ = other.encrypted_;
+    }
+    return *this;
+  }
+
+  // Moving the `maybe_encrypted_data_` vector leaves it empty, and the other
+  // values are updated to match an empty vector for safety.
+  ProcessBound(ProcessBound&& other) noexcept
+      : maybe_encrypted_data_(std::move(other.maybe_encrypted_data_)),
+        original_size_(std::exchange(other.original_size_, 0)),
+        encrypted_(std::exchange(other.encrypted_, false)) {}
+
+  ProcessBound& operator=(ProcessBound&& other) noexcept {
+    if (this != &other) {
+      SecureZeroBuffer(base::as_writable_byte_span(maybe_encrypted_data_));
+      maybe_encrypted_data_ = std::move(other.maybe_encrypted_data_);
+      original_size_ = std::exchange(other.original_size_, 0);
+      encrypted_ = std::exchange(other.encrypted_, false);
+    }
+    return *this;
+  }
+
+  // Create a process bound string. Takes a copy of the string passed in.
+  // If `encrypted` is false, the string will NOT be encrypted. This lets
+  // ProcessBound hold either encrypted or unencrypted strings without the
+  // overhead of a variant wrapper. If it's true, the string will be encrypted
+  // only on supported platforms.
+  explicit ProcessBound(const StringType& value, bool encrypted = true)
+      : original_size_(value.size()) {
+    const size_t target_size =
+        encrypted ? internal::MaybeRoundUp(value.size()) : value.size();
+    std::vector<CharType> data;
+    data.reserve(target_size);
+    data.assign(value.begin(), value.end());
+    if (encrypted) {
+      data.resize(target_size);
+      encrypted_ =
+          internal::MaybeEncryptBuffer(base::as_writable_byte_span(data));
+    } else {
+      encrypted_ = false;
+    }
+    maybe_encrypted_data_ = std::move(data);
+  }
+
+  ~ProcessBound() {
+    SecureZeroBuffer(base::as_writable_byte_span(maybe_encrypted_data_));
+  }
+
+  // Return the decrypted string, which may remain in memory. Prefer
+  // secure_value() where possible.
+  StringType value() const { return DecryptData<StringType>(); }
+
+  // Return the decrypted string as a string that attempts to wipe itself after
+  // use. Prefer over calling `value()` if caller can support it.
+  SecureStringType secure_value() const {
+    return DecryptData<SecureStringType>();
+  }
+
+  size_t size() const { return original_size_; }
+  bool empty() const { return size() == 0; }
+
+  // Returns true if the string is encrypted (ie. the platform supports
+  // encryption and the ProcessBound was created with `encrypted = true`).
+  bool is_encrypted() const { return encrypted_; }
+
+ private:
+  FRIEND_TEST_ALL_PREFIXES(ProcessBoundEncryptionTest, Encryption);
+  FRIEND_TEST_ALL_PREFIXES(ProcessBoundEncryptionTest, EmptyString);
+  FRIEND_TEST_ALL_PREFIXES(ProcessBoundEncryptionTest, Unencrypted);
+
+  template <typename DecryptedStringType>
+  DecryptedStringType DecryptData() const {
+    if (!encrypted_ || original_size_ == 0) {
+      return DecryptedStringType(maybe_encrypted_data_.data(), original_size_);
+    }
+
+    // Copy to decrypt in-place.
+    DecryptedStringType decrypted(maybe_encrypted_data_.begin(),
+                                  maybe_encrypted_data_.end());
+    // Attempt to avoid Small String Optimization (SSO) by reserving a larger
+    // allocation than the SSO default, forcing a dynamic allocation to occur,
+    // before any decrypted data is written to the string. This value was
+    // determined empirically.
+    constexpr size_t kSSOMaxSize = 64u;
+    if (decrypted.size() < kSSOMaxSize) {
+      decrypted.reserve(kSSOMaxSize);
+    }
+    CHECK(internal::MaybeDecryptBuffer(base::as_writable_byte_span(decrypted)));
+    decrypted.resize(original_size_);
+    return decrypted;
+  }
+
+  std::vector<CharType> maybe_encrypted_data_;
+  size_t original_size_ = 0;
+  bool encrypted_ = false;
+};
+
+using ProcessBoundString = ProcessBound<std::string>;
+using ProcessBoundWString = ProcessBound<std::wstring>;
+using ProcessBoundU16String = ProcessBound<std::u16string>;
+
+// SecureString variants here attempt to clean memory for the string data when
+// the string goes out of scope. However, while in memory it can be read, and if
+// copied somewhere else, the memory can also be read. This is a defense in
+// depth hardening and not meant to provide strong security guarantees.
+using SecureString =
+    std::basic_string<std::string::value_type,
+                      std::char_traits<std::string::value_type>,
+                      SecureAllocator<std::string::value_type>>;
+using SecureWString =
+    std::basic_string<std::wstring::value_type,
+                      std::char_traits<std::wstring::value_type>,
+                      SecureAllocator<std::wstring::value_type>>;
+using SecureU16String =
+    std::basic_string<std::u16string::value_type,
+                      std::char_traits<std::u16string::value_type>,
+                      SecureAllocator<std::u16string::value_type>>;
+
+}  // namespace crypto
+
+#endif  // CRYPTO_PROCESS_BOUND_STRING_H_

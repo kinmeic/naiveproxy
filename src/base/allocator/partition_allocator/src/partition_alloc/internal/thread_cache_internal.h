@@ -1,0 +1,658 @@
+// Copyright 2026 The Chromium Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+#ifndef PARTITION_ALLOC_INTERNAL_THREAD_CACHE_INTERNAL_H_
+#define PARTITION_ALLOC_INTERNAL_THREAD_CACHE_INTERNAL_H_
+
+#include <array>
+#include <atomic>
+#include <cstdint>
+#include <cstring>
+#include <limits>
+#include <memory>
+
+#include "partition_alloc/bucket_lookup.h"
+#include "partition_alloc/build_config.h"
+#include "partition_alloc/buildflags.h"
+#include "partition_alloc/partition_alloc-inl.h"
+#include "partition_alloc/partition_alloc_base/compiler_specific.h"
+#include "partition_alloc/partition_alloc_base/component_export.h"
+#include "partition_alloc/partition_alloc_base/cxx_wrapper/optional.h"
+#include "partition_alloc/partition_alloc_base/thread_annotations.h"
+#include "partition_alloc/partition_alloc_base/time/time.h"
+#include "partition_alloc/partition_alloc_config.h"
+#include "partition_alloc/partition_alloc_constants.h"
+#include "partition_alloc/partition_alloc_forward.h"
+#include "partition_alloc/partition_alloc_public_constants.h"
+#include "partition_alloc/partition_freelist_entry.h"
+#include "partition_alloc/partition_lock.h"
+#include "partition_alloc/partition_stats.h"
+#include "partition_alloc/partition_tls.h"
+#include "partition_alloc/scheduler_loop_quarantine.h"
+#include "partition_alloc/slot_address_and_size.h"
+#include "partition_alloc/slot_start.h"
+#include "partition_alloc/thread_cache.h"
+
+#if PA_BUILDFLAG(PA_ARCH_CPU_X86_64) && PA_BUILDFLAG(HAS_64_BIT_POINTERS)
+#include "partition_alloc/partition_alloc_base/cxx_wrapper/algorithm.h"
+#endif
+
+namespace partition_alloc {
+
+namespace tools {
+class ThreadCacheInspector;
+class HeapDumper;
+}  // namespace tools
+
+namespace internal {
+
+
+constexpr inline size_t kDefaultRootThreadCacheIndex = 0;
+
+#if PA_CONFIG(THREAD_CACHE_FAST_TLS)
+extern PA_COMPONENT_EXPORT(
+    PARTITION_ALLOC) thread_local ThreadCache* g_thread_caches
+    [kMaxThreadCacheIndex];
+#endif
+
+#if PA_CONFIG(THREAD_CACHE_FAST_TLS)
+// Represents a special index value within the thread-local `g_thread_caches`
+// array used to mark a "tombstone" state. Marking only at a specific index is
+// sufficient because all ThreadCaches for a single thread are deallocated
+// together when the thread terminates.
+constexpr inline size_t kThreadCacheTombstoneIndex = 0;
+#endif
+
+// Represents an index of the array (g_thread_caches, PartitionTls)
+// storing the thread cache for SchedulerLoopQuarantine.
+constexpr inline size_t kThreadCacheQuarantineIndex = 0;
+
+#if PA_CONFIG(THREAD_CACHE_ENABLE_STATISTICS)
+#define PA_INCREMENT_COUNTER(counter) ++counter
+#else
+#define PA_INCREMENT_COUNTER(counter) \
+  do {                                \
+  } while (0)
+#endif  // PA_CONFIG(THREAD_CACHE_ENABLE_STATISTICS)
+
+#if PA_BUILDFLAG(DCHECKS_ARE_ON)
+
+class ReentrancyGuard {
+ public:
+  explicit ReentrancyGuard(bool& flag) : flag_(flag) {
+    PA_CHECK(!flag_);
+    flag_ = true;
+  }
+
+  ~ReentrancyGuard() { flag_ = false; }
+
+ private:
+  bool& flag_;
+};
+
+#define PA_REENTRANCY_GUARD(x)      \
+  internal::ReentrancyGuard guard { \
+    x                               \
+  }
+
+#else  // PA_BUILDFLAG(DCHECKS_ARE_ON)
+
+#define PA_REENTRANCY_GUARD(x) \
+  do {                         \
+  } while (0)
+
+#endif  // PA_BUILDFLAG(DCHECKS_ARE_ON)
+
+// Per-thread cache. *Not* threadsafe, must only be accessed from a single
+// thread.
+//
+// In practice, this is easily enforced as long as only |instance| is
+// manipulated, as it is a thread_local member. As such, any
+// |ThreadCache::instance->*()| call will necessarily be done from a single
+// thread.
+class PA_COMPONENT_EXPORT(PARTITION_ALLOC) ThreadCache {
+ public:
+  struct Bucket {
+    internal::FreelistEntry* freelist_head = nullptr;
+    // Want to keep sizeof(Bucket) small, using small types.
+    uint8_t count = 0;
+    std::atomic<uint8_t> limit;  // Can be changed from another thread.
+    uint16_t slot_size = 0;
+
+    Bucket();
+  };
+
+  // Initializes the thread cache for |root|. May allocate, so should be called
+  // with the thread cache disabled on the partition side, and without the
+  // partition lock held.
+  //
+  // May only be called by a single PartitionRoot.
+  static void Init(PartitionRoot* root);
+  static bool IsInitialized();
+
+  static void DeleteForTesting();
+
+  // Deletes existing thread cache and creates a new one for |root|.
+  static void SwapForTesting(PartitionRoot* root, size_t index);
+
+  // Removes the tombstone marker that would be returned by Get() otherwise.
+  static void RemoveTombstoneForTesting();
+
+  // Can be called several times, must be called before any ThreadCache
+  // interactions.
+  static void EnsureThreadSpecificDataInitialized();
+
+  PA_ALWAYS_INLINE static ThreadCache* Get(size_t index) {
+    PA_DCHECK(index < internal::kMaxThreadCacheIndex);
+#if PA_CONFIG(THREAD_CACHE_FAST_TLS)
+    return PA_UNSAFE_TODO(internal::g_thread_caches[index]);
+#else
+    auto* tls = internal::GetTls();
+    if (!tls) [[unlikely]] {
+      return nullptr;
+    }
+    auto* tcache = tls->GetThreadCache(index);
+    if (!IsValid(tcache)) [[unlikely]] {
+      return nullptr;
+    }
+    return tcache;
+#endif
+  }
+
+  // Get ThreadCache for SchedulerLoopQurantine, which is stored in index 0.
+  static ThreadCache* EnsureAndGetForQuarantine();
+
+  // Returns true if the given pointer is not nullptr or kTombstone.
+  static bool IsValidPtr(const ThreadCache* tcache) {
+    // Do not MTE-untag, as it'd mess up the sentinel value.
+    return reinterpret_cast<uintptr_t>(tcache) & kTombstoneMask;
+  }
+
+  // Returns true if the ThreadCache* from ThreadCache::Get() is valid
+  // and initialized.
+  static bool IsValid(const ThreadCache* tcache) {
+    // Even if the array of ThreadCache is allocated, the ThreadCache object
+    // may not be initialized, and thus check `root_` to know if initialized.
+    // We use pointer arithmetic to directly inspect the memory for `root_`, as
+    // accessing `tcache->root_` is UB before the ThreadCache object's lifetime
+    // begins (i.e., between memset(0) and placement new).
+    return IsValidPtr(tcache) &&
+           PA_UNSAFE_TODO(*reinterpret_cast<const uintptr_t*>(
+               (reinterpret_cast<const uint8_t*>(tcache) +
+                offsetof(ThreadCache, root_))));
+  }
+
+  static bool IsTombstone() {
+#if PA_CONFIG(THREAD_CACHE_FAST_TLS)
+    void* ptr = PA_UNSAFE_TODO(
+        internal::g_thread_caches[internal::kThreadCacheTombstoneIndex]);
+    return reinterpret_cast<uintptr_t>(ptr) == kTombstone;
+#else
+    return internal::IsTombstoneSlow();
+#endif
+  }
+
+  // Create a new ThreadCache associated with |root|.
+  // Must be called without the partition locked, as this may allocate.
+  static ThreadCache* Create(PartitionRoot* root, size_t index);
+
+  ~ThreadCache();
+
+  // Disallow copy and move.
+  ThreadCache(const ThreadCache&) = delete;
+  ThreadCache(const ThreadCache&&) = delete;
+  ThreadCache& operator=(const ThreadCache&) = delete;
+
+  // Tries to put a slot at |slot_start| into the cache.
+  // The slot comes from the bucket at index |bucket_index| from the partition
+  // this cache is for. `poison` determines whether the slot will be poisoned,
+  // which is not necessary if it has already been poisoned.
+  //
+  // When `allow_clear_bucket` is false, refuses insertion once the bucket
+  // reaches its post-clearing target (`(limit + 1) / 2`) so bulk callers that
+  // already batch-free to the root avoid repeatedly overflowing and walking the
+  // freelist via `ClearBucket()`.
+  // TODO(crbug.com/579744817): Remove `allow_clear_bucket` once dedicated
+  // batch-free support is implemented in `ThreadCache`.
+  //
+  // Returns the slot size if the insertion succeeds, `nullopt` otherwise.
+  // Insertion can fail either because the cache is full or the
+  // allocation was too large.
+  template <bool allow_clear_bucket = true, bool poison = true>
+  PA_ALWAYS_INLINE std::optional<size_t> MaybePutInCache(
+      UntaggedSlotStart slot_start,
+      size_t bucket_index);
+
+  // Tries to allocate a memory slot from the cache.
+  //
+  // Has the same behavior as RawAlloc(), that is: no cookie nor ref-count
+  // handling.
+  PA_ALWAYS_INLINE std::optional<SlotAddressAndSize> GetFromCache(
+      size_t bucket_index);
+
+  // Asks this cache to trigger |Purge()| at a later point. Can be called from
+  // any thread.
+  void SetShouldPurge();
+  // Empties the cache.
+  // The Partition lock must *not* be held when calling this.
+  // Must be called from the thread this cache is for.
+  void Purge();
+  // Amount of cached memory for this thread's cache, in bytes.
+  size_t CachedMemory() const;
+
+  const ThreadAllocStats& thread_alloc_stats() const {
+    return thread_alloc_stats_;
+  }
+  size_t bucket_count_for_testing(size_t index) const {
+    return buckets_[index].count;
+  }
+
+  internal::base::PlatformThreadId thread_id() const { return thread_id_; }
+
+  // Prints statistics for all thread caches, or this thread's only.
+  static void DumpStats(bool my_thread_only,
+                        ThreadCacheStats* stats,
+                        size_t index);
+  // Purge() this thread's cache, and asks the other ones to trigger Purge() at
+  // a later point (during a deallocation).
+  static void PurgeAll();
+
+  // Runs `PurgeAll` and updates the next interval which
+  // `GetPeriodicPurgeNextIntervalInMicroseconds` returns.
+  //
+  // Note that it's a caller's responsibility to invoke this member function
+  // periodically with an appropriate interval. This function does not schedule
+  // any task nor timer.
+  static void RunPeriodicPurge();
+  // Returns the appropriate interval to invoke `RunPeriodicPurge` next time.
+  static int64_t GetPeriodicPurgeNextIntervalInMicroseconds();
+
+  // Controls the thread cache size, by setting the multiplier to a value above
+  // or below |ThreadCache::kDefaultMultiplier|.
+  static void SetThreadCacheMultiplier(float multiplier);
+  // Purges all thread caches *now*. This is completely thread-unsafe, and
+  // should only be called in a post-fork() handler.
+  static void ForcePurgeAllThreadAfterForkUnsafe();
+
+  // Sets the maximum size of allocations that may be cached by the thread
+  // cache. This applies to all threads. However, the maximum size is bounded by
+  // |kLargeSizeThreshold|.
+  static void SetLargestCachedSize(size_t size);
+
+  // Cumulative stats about *all* allocations made on the `root_` partition on
+  // this thread, that is not only the allocations serviced by the thread cache,
+  // but all allocations, including large and direct-mapped ones. This should in
+  // theory be split into a separate PerThread data structure, but the thread
+  // cache is the only per-thread data we have as of now.
+  //
+  // TODO(lizeb): Investigate adding a proper per-thread data structure.
+  PA_ALWAYS_INLINE void RecordAllocation(size_t size);
+  PA_ALWAYS_INLINE void RecordDeallocation(size_t size);
+  void ResetPerThreadAllocationStatsForTesting();
+
+  static constexpr internal::base::TimeDelta kMinPurgeInterval =
+      internal::base::Seconds(1);
+  static constexpr internal::base::TimeDelta kMaxPurgeInterval =
+      internal::base::Minutes(1);
+  static constexpr internal::base::TimeDelta kDefaultPurgeInterval =
+      2 * kMinPurgeInterval;
+  static constexpr size_t kMinCachedMemoryForPurgingBytes = 500 * 1024;
+
+  // Fill 1 / kBatchFillRatio * bucket.limit slots at a time.
+  static constexpr uint16_t kBatchFillRatio = 8;
+
+  // Limit for the smallest bucket will be kDefaultMultiplier *
+  // kSmallBucketBaseCount by default.
+  static constexpr uint8_t kSmallBucketBaseCount = 64;
+
+  static constexpr size_t kDefaultSizeThreshold =
+      kThreadCacheDefaultSizeThreshold;
+  static constexpr size_t kLargeSizeThreshold = kThreadCacheLargeSizeThreshold;
+  static constexpr uint16_t kBucketCount =
+      BucketIndexLookup::GetIndexForNeutralBuckets(
+          kThreadCacheLargeSizeThreshold) +
+      1;
+  static_assert(
+      kBucketCount <= BucketIndexLookup::kNumBuckets,
+      "Cannot have more cached buckets than what the allocator supports");
+
+  ThreadCacheStats& stats_for_testing() {
+    return GetEnclosingTls()->thread_cache_stats;
+  }
+
+  PartitionRoot* GetRoot();
+
+  Bucket& bucket_for_testing(size_t index) { return buckets_[index]; }
+  void ClearBucketForTesting(Bucket& bucket, size_t limit) {
+    ClearBucket(bucket, limit);
+  }
+
+  internal::ThreadBoundSchedulerLoopQuarantineBranch&
+  GetSchedulerLoopQuarantineBranch() {
+    return scheduler_loop_quarantine_branch_;
+  }
+
+  // Returns true if the given address is in the thread cache's freelist.
+  // Otherwise, returns false.
+  bool IsInFreelist(UntaggedSlotStart address,
+                    size_t bucket_index,
+                    size_t& position);
+
+ private:
+  friend class tools::HeapDumper;
+  friend class tools::ThreadCacheInspector;
+
+  static_assert(sizeof(Bucket) <= 2 * sizeof(void*), "Keep Bucket small.");
+
+  explicit ThreadCache(PartitionRoot* root);
+
+  static void* operator new(size_t count);
+  static void operator delete(void* ptr);
+
+  // Returns the `PartitionTls` of the thread this `ThreadCache` belongs to.
+  //
+  // Every live `ThreadCache` is constructed in-place via placement new inside
+  // `PartitionTls::thread_cache_storage[index]` (see `ThreadCache::Create()`
+  // and the layout comment on `PartitionTls` in `partition_tls.h`). When
+  // `kMaxThreadCacheIndex == 1`, `this` is always
+  // `&tls->thread_cache_storage[0]`, which sits at fixed offset
+  // `offsetof(PartitionTls, thread_cache_storage)` inside `PartitionTls`.
+  // Subtracting that offset recovers `tls` via compile-time pointer arithmetic
+  // without calling `GetTls()` (which performs an OS TLS lookup on most
+  // platforms). Since `offsetof(PartitionTls, thread_cache_stats)` is also a
+  // compile-time constant, `GetEnclosingTls()->thread_cache_stats.foo` folds
+  // into a single memory operand with a constant displacement from `this`.
+  PA_RETURNS_NONNULL PA_ALWAYS_INLINE PartitionTls* GetEnclosingTls() {
+    PA_DCHECK(IsValid(this));
+    if constexpr (internal::kMaxThreadCacheIndex == 1) {
+      return reinterpret_cast<PartitionTls*>(
+          reinterpret_cast<uintptr_t>(this) -
+          offsetof(PartitionTls, thread_cache_storage));
+    } else {
+      // With multiple slots, `this` is `&tls->thread_cache_storage[i]` for an
+      // `i` not stored in `ThreadCache`, so fall back to the TLS lookup.
+      return internal::GetTls();
+    }
+  }
+
+  void PurgeInternal();
+
+  // Fills a bucket from the central allocator.
+  void FillBucket(size_t bucket_index);
+  // Empties the |bucket| until there are at most |limit| objects in it.
+  void ClearBucket(Bucket& bucket, size_t limit);
+  // `poison` determines whether the slot will be poisoned, which is not
+  // necessary if it has already been poisoned.
+  template <bool poison = true>
+  PA_ALWAYS_INLINE void PutInBucket(Bucket& bucket,
+                                    UntaggedSlotStart slot_start);
+  void ResetForTesting();
+  // Releases the entire freelist starting at |head| to the root.
+  void FreeAfter(internal::FreelistEntry* head, size_t slot_size);
+  static void SetGlobalLimits(PartitionRoot* root, float multiplier);
+
+  // On some architectures, ThreadCache::Get() can be called and return
+  // something after the thread cache has been destroyed. In this case, we set
+  // it to this value, to signal that the thread is being terminated, and the
+  // thread cache should not be used.
+  //
+  // This happens in particular on Windows, during program termination.
+  //
+  // We choose 0x1 as the value as it is an invalid pointer value, since it is
+  // not aligned, and too low. Also, checking !(ptr & kTombstoneMask) checks for
+  // nullptr and kTombstone at the same time.
+  static constexpr uintptr_t kTombstone = 0x1;
+  static constexpr uintptr_t kTombstoneMask = ~kTombstone;
+
+  static std::array<uint8_t, kBucketCount> global_limits_;
+
+ private:
+  // These are at the beginning as they're accessed for each allocation.
+  uint32_t cached_memory_ = 0;
+  // Number of active buckets in this thread cache. Not all processes/platforms
+  // will use all buckets, as using larger buckets increases the memory
+  // footprint.
+  uint16_t active_bucket_count_ = 0;
+  std::atomic<bool> should_purge_;
+#if PA_BUILDFLAG(HAS_64_BIT_POINTERS)
+  const internal::PoolOffsetLookup offset_lookup_;
+#endif  // PA_BUILDFLAG(HAS_64_BIT_POINTERS)
+  ThreadAllocStats thread_alloc_stats_;
+
+  // Buckets are quite big, though each is only 2 pointers.
+  std::array<Bucket, kBucketCount> buckets_;
+
+  // Cold data below.
+  // Left uninitialized in the member initializer list so the zero-initialized
+  // bytes in `PartitionTls::thread_cache_storage` remain 0 (i.e. `!IsValid()`)
+  // until `PartitionTlsRegistry::GetLock()` is acquired in the constructor
+  // body.
+  PartitionRoot* root_;
+
+  const internal::base::PlatformThreadId thread_id_;
+#if PA_BUILDFLAG(DCHECKS_ARE_ON)
+  bool is_in_thread_cache_ = false;
+#endif
+
+  // Thread-Local version of `PartitionRoot::scheduler_loop_quarantine_branch_`.
+  internal::ThreadBoundSchedulerLoopQuarantineBranch
+      scheduler_loop_quarantine_branch_;
+
+  friend class PartitionAllocThreadCacheTest;
+  friend class tools::ThreadCacheInspector;
+};
+
+template <bool allow_clear_bucket, bool poison>
+PA_ALWAYS_INLINE std::optional<size_t> ThreadCache::MaybePutInCache(
+    UntaggedSlotStart slot_start,
+    size_t bucket_index) {
+  PA_REENTRANCY_GUARD(is_in_thread_cache_);
+  PA_INCREMENT_COUNTER(GetEnclosingTls()->thread_cache_stats.cache_fill_count);
+
+  if (bucket_index >= active_bucket_count_) [[unlikely]] {
+    PA_INCREMENT_COUNTER(
+        GetEnclosingTls()->thread_cache_stats.cache_fill_misses);
+    return std::nullopt;
+  }
+
+  auto& bucket = buckets_[bucket_index];
+
+  PA_DCHECK(bucket.count != 0 || bucket.freelist_head == nullptr);
+
+  // Relaxed ordering: we don't care about having an up-to-date or consistent
+  // value, just want it to not change while we are using it, hence using
+  // relaxed ordering, and loading into a local variable. Without it, we are
+  // gambling that the compiler would not issue multiple loads.
+  uint8_t limit = bucket.limit.load(std::memory_order_relaxed);
+  if constexpr (!allow_clear_bucket) {
+    if (bucket.count >= (limit + 1) / 2) {
+      PA_INCREMENT_COUNTER(
+          GetEnclosingTls()->thread_cache_stats.cache_fill_misses);
+      if (should_purge_.load(std::memory_order_relaxed)) [[unlikely]] {
+        PurgeInternal();
+      }
+      return std::nullopt;
+    }
+  }
+
+  PutInBucket<poison>(bucket, slot_start);
+  cached_memory_ += bucket.slot_size;
+  PA_INCREMENT_COUNTER(GetEnclosingTls()->thread_cache_stats.cache_fill_hits);
+
+  if constexpr (allow_clear_bucket) {
+    // Batched deallocation, amortizing lock acquisitions.
+    if (bucket.count > limit) [[unlikely]] {
+      ClearBucket(bucket, limit / 2);
+    }
+  } else {
+    PA_DCHECK(bucket.count <= limit);
+  }
+
+  if (should_purge_.load(std::memory_order_relaxed)) [[unlikely]] {
+    PurgeInternal();
+  }
+
+  return bucket.slot_size;
+}
+
+PA_ALWAYS_INLINE std::optional<SlotAddressAndSize> ThreadCache::GetFromCache(
+    size_t bucket_index) {
+#if PA_CONFIG(THREAD_CACHE_ALLOC_STATS)
+  PA_INCREMENT_COUNTER(
+      GetEnclosingTls()->thread_cache_stats.allocs_per_bucket_[bucket_index]);
+#endif
+
+  PA_REENTRANCY_GUARD(is_in_thread_cache_);
+  PA_INCREMENT_COUNTER(GetEnclosingTls()->thread_cache_stats.alloc_count);
+  // Only handle "small" allocations.
+  if (bucket_index >= active_bucket_count_) [[unlikely]] {
+    PA_INCREMENT_COUNTER(GetEnclosingTls()->thread_cache_stats.alloc_misses);
+    PA_INCREMENT_COUNTER(
+        GetEnclosingTls()->thread_cache_stats.alloc_miss_too_large);
+    return std::nullopt;
+  }
+
+  auto& bucket = buckets_[bucket_index];
+  if (bucket.freelist_head) [[likely]] {
+    PA_INCREMENT_COUNTER(GetEnclosingTls()->thread_cache_stats.alloc_hits);
+  } else {
+    PA_DCHECK(bucket.count == 0);
+    PA_INCREMENT_COUNTER(GetEnclosingTls()->thread_cache_stats.alloc_misses);
+    PA_INCREMENT_COUNTER(
+        GetEnclosingTls()->thread_cache_stats.alloc_miss_empty);
+
+    FillBucket(bucket_index);
+
+    // Very unlikely, means that the central allocator is out of memory. Let it
+    // deal with it (may return 0, may crash).
+    if (!bucket.freelist_head) [[unlikely]] {
+      return std::nullopt;
+    }
+  }
+
+  PA_DCHECK(bucket.count != 0);
+  internal::FreelistEntry* entry = bucket.freelist_head;
+  // TODO(lizeb): Consider removing once crbug.com/1382658 is fixed.
+#if PA_BUILDFLAG(IS_CHROMEOS) && PA_BUILDFLAG(PA_ARCH_CPU_X86_64) && \
+    PA_BUILDFLAG(HAS_64_BIT_POINTERS)
+  // x86_64 architecture now supports 57 bits of address space, as of Ice Lake
+  // for Intel. Chrome OS systems do not ship with kernel support for
+  // it, but with 48 bits, so all canonical addresses have the upper 16 bits
+  // zeroed (17 in practice, since the upper half of address space is reserved
+  // by the kernel).
+  constexpr uintptr_t kCanonicalPointerMask = (1ULL << 48) - 1;
+  PA_CHECK(!(reinterpret_cast<uintptr_t>(entry) & ~kCanonicalPointerMask));
+#endif  // PA_BUILDFLAG(IS_CHROMEOS) && PA_BUILDFLAG(PA_ARCH_CPU_X86_64) &&
+        // PA_BUILDFLAG(HAS_64_BIT_POINTERS)
+
+  // Passes the bucket size to |GetNextForThreadCache()|, so that in case of
+  // freelist corruption, we know the bucket size that lead to the crash,
+  // helping to narrow down the search for culprit. |bucket| was touched just
+  // now, so this does not introduce another cache miss.
+#if PA_BUILDFLAG(HAS_64_BIT_POINTERS)
+  internal::FreelistEntry* next =
+      entry->GetNextForThreadCache(bucket.slot_size, offset_lookup_);
+#else
+  internal::FreelistEntry* next =
+      entry->GetNextForThreadCache(bucket.slot_size);
+#endif  // PA_BUILDFLAG(HAS_64_BIT_POINTERS)
+
+  PA_DCHECK(entry != next);
+  bucket.count--;
+  PA_DCHECK(bucket.count != 0 || !next);
+  bucket.freelist_head = next;
+
+  PA_DCHECK(cached_memory_ >= bucket.slot_size);
+  cached_memory_ -= bucket.slot_size;
+
+  return SlotAddressAndSize{
+      .slot_start = SlotStart::Unchecked(entry).Untag(),
+      .size = bucket.slot_size,
+  };
+}
+
+template <bool poison>
+PA_ALWAYS_INLINE void ThreadCache::PutInBucket(Bucket& bucket,
+                                               UntaggedSlotStart slot_start) {
+#if PA_CONFIG(HAS_FREELIST_SHADOW_ENTRY) && \
+    PA_BUILDFLAG(PA_ARCH_CPU_X86_64) && PA_BUILDFLAG(HAS_64_BIT_POINTERS)
+  if constexpr (poison) {
+    // We see freelist corruption crashes happening in the wild.  These are
+    // likely due to out-of-bounds accesses in the previous slot, or to a
+    // Use-After-Free somewhere in the code.
+    //
+    // The issue is that we detect the UaF far away from the place where it
+    // happens. As a consequence, we should try to make incorrect code crash as
+    // early as possible. Poisoning memory at free() time works for UaF, but it
+    // was seen in the past to incur a high performance cost.
+    //
+    // Here, only poison the current cacheline, which we are touching anyway.
+    // TODO(lizeb): Make sure this does not hurt performance.
+
+    // Everything below requires this alignment.
+    static_assert(internal::kAlignment == 16, "");
+
+    // The pointer is always 16 bytes aligned, so its start address is always ==
+    // 0 % 16. Its distance to the next cacheline is
+    //   `64 - ((slot_start & 63) / 16) * 16`
+    static_assert(
+        internal::kPartitionCachelineSize == 64,
+        "The computation below assumes that cache lines are 64 bytes long.");
+    int distance_to_next_cacheline_in_16_bytes =
+        4 - ((slot_start.value() >> 4) & 3);
+    int slot_size_remaining_in_16_bytes = bucket.slot_size / 16;
+    slot_size_remaining_in_16_bytes =
+        std::min(slot_size_remaining_in_16_bytes,
+                 distance_to_next_cacheline_in_16_bytes);
+
+    static const uint32_t poison_16_bytes[4] = {0xbadbad00, 0xbadbad00,
+                                                0xbadbad00, 0xbadbad00};
+
+#if !(PA_BUILDFLAG(IS_WIN) && PA_BUILDFLAG(IS_COMPONENT_BUILD)) && \
+    PA_HAS_BUILTIN(__builtin_assume_aligned)
+    void* slot_start_tagged = __builtin_assume_aligned(
+        slot_start.Tag().ToObject(), internal::kAlignment);
+#else
+    // TODO(crbug.com/40262684): std::assume_aligned introduce an additional
+    // dependency: _libcpp_verbose_abort(const char*, ...).  It will cause
+    // "undefined symbol" error when linking allocator_shim.dll.
+    void* slot_start_tagged = slot_start.Tag().ToObject();
+#endif
+
+    uint32_t* address_aligned = static_cast<uint32_t*>(slot_start_tagged);
+    for (int i = 0; i < slot_size_remaining_in_16_bytes; i++) {
+      // Clang will expand the memcpy to a 16-byte write (movups on x86).
+      PA_UNSAFE_TODO(
+          memcpy(address_aligned, poison_16_bytes, sizeof(poison_16_bytes)));
+      PA_UNSAFE_TODO(address_aligned += 4);
+    }
+  }
+#endif  // PA_CONFIG(HAS_FREELIST_SHADOW_ENTRY) &&
+        // PA_BUILDFLAG(PA_ARCH_CPU_X86_64) && PA_BUILDFLAG(HAS_64_BIT_POINTERS)
+
+#if PA_BUILDFLAG(HAS_64_BIT_POINTERS)
+  auto* entry = internal::FreelistEntry::EmplaceAndInitForThreadCache(
+      slot_start, bucket.freelist_head, offset_lookup_);
+#else
+  auto* entry = internal::FreelistEntry::EmplaceAndInitForThreadCache(
+      slot_start, bucket.freelist_head);
+#endif
+  bucket.freelist_head = entry;
+  bucket.count++;
+}
+
+PA_ALWAYS_INLINE void ThreadCache::RecordAllocation(size_t size) {
+  thread_alloc_stats_.alloc_count++;
+  thread_alloc_stats_.alloc_total_size += size;
+}
+
+PA_ALWAYS_INLINE void ThreadCache::RecordDeallocation(size_t size) {
+  thread_alloc_stats_.dealloc_count++;
+  thread_alloc_stats_.dealloc_total_size += size;
+}
+
+}  // namespace internal
+}  // namespace partition_alloc
+
+#endif  // PARTITION_ALLOC_INTERNAL_THREAD_CACHE_INTERNAL_H_
