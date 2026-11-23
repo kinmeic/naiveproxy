@@ -40,10 +40,10 @@ config("gtest_config") {
     cflags = [ "/wd4800" ]  # Unused variable warning.
   }
 
-  configs = [
-    "//third_party/abseil-cpp:absl_include_config",
-    "//third_party/re2:re2_config",
-  ]
+  configs = [ "//third_party/abseil-cpp:absl_include_config" ]
+  if (build_with_chromium) {
+    configs += [ "//third_party/re2:re2_config" ]
+  }
 }
 
 config("gmock_config") {
