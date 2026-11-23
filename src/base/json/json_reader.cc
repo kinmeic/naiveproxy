@@ -11,8 +11,6 @@
 #include "base/logging.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
-#include "build/build_config.h"
-
 
 namespace base {
 
