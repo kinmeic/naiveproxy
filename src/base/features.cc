@@ -55,7 +55,7 @@ std::atomic_bool g_i18n_optimizations{true};
 
 // Alphabetical:
 
-// Use Rust base64 (simd) for base::Base64Encode() and
+// Use the SIMD Base64 implementation for base::Base64Encode() and
 // base::Base64EncodeAppend().
 BASE_FEATURE(kBase64SimdBase64Encode, base::FEATURE_DISABLED_BY_DEFAULT);
 
