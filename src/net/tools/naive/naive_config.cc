@@ -247,13 +247,7 @@ bool NaiveConfig::Parse(const base::DictValue& value) {
             << std::endl;
         return false;
       }
-      ProxyChain proxy_chain;
-      if (std::any_of(proxy_servers.begin(), proxy_servers.end(),
-                      [](const ProxyServer& s) { return s.is_quic(); })) {
-        proxy_chain = ProxyChain::ForIpProtection(proxy_servers);
-      } else {
-        proxy_chain = ProxyChain(proxy_servers);
-      }
+      ProxyChain proxy_chain(proxy_servers);
 
       if (!proxy_chain.IsValid()) {
         std::cerr << "Invalid proxy chain" << std::endl;
